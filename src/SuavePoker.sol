@@ -152,7 +152,8 @@ contract SuavePokerTable {
             "suavePoker:v0:dataId"
         );
         // As part of initialization - have to initialize seed to some value
-        RNG.storeSeed(rng.id, 123456);
+        bytes memory seed = abi.encode(123456);
+        RNG.storeSeed(rng.id, seed);
 
         Suave.DataRecord memory button = Suave.newDataRecord(
             0,
@@ -310,8 +311,7 @@ contract SuavePokerTable {
         require(_depositOk(depositAmount));
 
         // They must also to pass in a random number to seed the RNG
-        bytes memory randBytes = Context.confidentialInputs();
-        uint noise = abi.decode(randBytes, (uint));
+        bytes memory noise = Context.confidentialInputs();
         RNG.addNoise(rngRef, noise);
 
         Suave.DataId playerAddr;

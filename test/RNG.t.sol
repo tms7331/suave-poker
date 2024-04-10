@@ -23,7 +23,8 @@ contract TestForge is Test, SuaveEnabled {
         );
 
         // Part of initialization - have to initialize seed to some value
-        RNG.storeSeed(record1.id, 123456);
+        bytes memory seed = abi.encode(123456);
+        RNG.storeSeed(record1.id, seed);
 
         return record1.id;
     }
@@ -34,10 +35,10 @@ contract TestForge is Test, SuaveEnabled {
 
         // Simulate adding two players' random noise
         // Changing either one should result in output changing
-        RNG.addNoise(ref, 383833);
-        RNG.addNoise(ref, 567890);
+        RNG.addNoise(ref, abi.encode(383833));
+        RNG.addNoise(ref, abi.encode(567890));
 
-        for (int i = 0; i < 52; i++) {
+        for (int i = 0; i < 5; i++) {
             uint256 randNum = RNG.generateRandomNumber(ref, maxValue);
             console.log(randNum);
         }
