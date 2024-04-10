@@ -24,6 +24,7 @@ contract SuavePokerTable {
     Suave.DataId private cards0;
     Suave.DataId private autoPost0;
     Suave.DataId private sittingOut0;
+    Suave.DataId private playerBetStreet0; // uint - total amount player put into pot on this street
     // P2
     Suave.DataId private playerAddr1; // address
     Suave.DataId private stack1; // uint
@@ -31,6 +32,7 @@ contract SuavePokerTable {
     Suave.DataId private cards1; // len 2 array of cards (uint 0 to 51)
     Suave.DataId private autoPost1; // bool
     Suave.DataId private sittingOut1; // bool
+    Suave.DataId private playerBetStreet1; // uint - total amount player put into pot on this street
 
     // TableState
     Suave.DataId private button; // uint8
@@ -42,6 +44,9 @@ contract SuavePokerTable {
     Suave.DataId private boardCards; // len 5 array of cards (uint 0 to 51)
     Suave.DataId private pot; // uint
     Suave.DataId private gameOver; // bool
+    // these two should be reset every street
+    Suave.DataId private facingBet; // uint - biggest bet size (total bet amount) on a street
+    Suave.DataId private lastRaise; // uint - last difference between bets
 
     event PlayerJoined(address player, uint8 seat, uint stack);
 
@@ -59,7 +64,6 @@ contract SuavePokerTable {
         Showdown,
         Settle
     }
-
     enum ActionType {
         Bet,
         Raise,
@@ -67,6 +71,7 @@ contract SuavePokerTable {
         Call,
         Check
     }
+
     struct Action {
         uint256 amount;
         ActionType act;
@@ -95,7 +100,9 @@ contract SuavePokerTable {
         Suave.DataId _whoseTurn,
         Suave.DataId _actionList,
         Suave.DataId _pot,
-        Suave.DataId _gameOver
+        Suave.DataId _gameOver,
+        Suave.DataId _facingBet,
+        Suave.DataId _lastRaise
     ) public payable {
         initComplete = true;
         console.log("initTableCallback called...");
@@ -106,6 +113,8 @@ contract SuavePokerTable {
         actionList = _actionList;
         pot = _pot;
         gameOver = _gameOver;
+        facingBet = _facingBet;
+        lastRaise = _lastRaise;
     }
 
     function joinTableCallback(
@@ -123,7 +132,8 @@ contract SuavePokerTable {
         Suave.DataId _inHand,
         Suave.DataId _cards,
         Suave.DataId _autoPost,
-        Suave.DataId _sittingOut
+        Suave.DataId _sittingOut,
+        Suave.DataId _playerBetStreet
     ) public payable {
         console.log("initPlayerCallback called...");
 
@@ -134,6 +144,7 @@ contract SuavePokerTable {
             cards0 = _cards;
             autoPost0 = _autoPost;
             sittingOut0 = _sittingOut;
+            playerBetStreet0 = _playerBetStreet;
         } else if (whichPlayer == 1) {
             playerAddr1 = _playerAddr;
             stack1 = _stack;
@@ -141,6 +152,7 @@ contract SuavePokerTable {
             cards1 = _cards;
             autoPost1 = _autoPost;
             sittingOut1 = _sittingOut;
+            playerBetStreet1 = _playerBetStreet;
         }
     }
 
@@ -197,6 +209,20 @@ contract SuavePokerTable {
             "suavePoker:v0:dataId"
         );
 
+        Suave.DataRecord memory facingBet = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+
+        Suave.DataRecord memory lastRaise = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+
         return
             abi.encodeWithSelector(
                 this.initTableCallback.selector,
@@ -206,7 +232,9 @@ contract SuavePokerTable {
                 whoseTurn.id,
                 actionList.id,
                 pot.id,
-                gameOver.id
+                gameOver.id,
+                facingBet.id,
+                lastRaise.id
             );
     }
 
@@ -266,6 +294,13 @@ contract SuavePokerTable {
             abi.encode(address(0))
         );
 
+        Suave.DataRecord memory playerBetStreet = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+
         return
             abi.encodeWithSelector(
                 this.initPlayerCallback.selector,
@@ -275,9 +310,11 @@ contract SuavePokerTable {
                 inHand.id,
                 cards.id,
                 autoPost.id,
-                sittingOut.id
+                sittingOut.id,
+                playerBetStreet.id
             );
     }
+
     function nullCallback() public payable {
         console.log("nullCallback...");
     }
