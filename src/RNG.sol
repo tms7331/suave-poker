@@ -35,4 +35,11 @@ library RNG {
         uint newSeed = uint256(keccak256(abi.encodePacked(seed, noise)));
         storeSeed(ref, newSeed);
     }
+
+    // Should we switch to using bytes instead of a uint?  Probably a better fit?
+    function addNoiseBytes(Suave.DataId ref, bytes memory noise) internal {
+        uint256 seed = getSeed(ref);
+        uint newSeed = uint256(keccak256(abi.encodePacked(seed, noise)));
+        storeSeed(ref, newSeed);
+    }
 }

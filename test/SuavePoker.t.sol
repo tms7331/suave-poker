@@ -5,6 +5,8 @@ import "forge-std/Test.sol";
 import "suave-std/Test.sol";
 import "suave-std/suavelib/Suave.sol";
 import "forge-std/console.sol";
+import "suave-std/Context.sol";
+
 import {SuavePokerTable} from "../src/SuavePoker.sol";
 
 // Contract with all internal methods exposed
@@ -25,7 +27,7 @@ contract SuavePokerTableHarness is SuavePokerTable {
     }
 }
 
-contract TestForge is Test, SuaveEnabled {
+contract TestSuavePoker is Test, SuaveEnabled {
     event PlayerJoined(address player, uint8 seat, uint stack);
 
     function testInsertOrder() public {
@@ -65,12 +67,20 @@ contract TestForge is Test, SuaveEnabled {
         assertEq(spt.smallBlind(), _smallBlind);
         assertEq(spt.bigBlind(), _bigBlind);
 
+        uint seed = 123;
+        bytes memory input = abi.encode(seed);
+        ctx.setConfidentialInputs(input);
+
         // Join as two different players
         vm.prank(address(1));
         bytes memory o3 = spt.joinTable(0, 100);
         vm.expectEmit(true, true, true, true);
         emit PlayerJoined(address(1), 0, 100);
         address(spt).call(o3);
+
+        seed = 456;
+        input = abi.encode(seed);
+        ctx.setConfidentialInputs(input);
 
         vm.prank(address(2));
         bytes memory o4 = spt.joinTable(1, 100);

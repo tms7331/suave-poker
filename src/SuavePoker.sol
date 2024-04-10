@@ -2,6 +2,8 @@
 pragma solidity ^0.8.13;
 import "suave-std/suavelib/Suave.sol";
 import "forge-std/console.sol";
+import "suave-std/Context.sol";
+import {RNG} from "./RNG.sol";
 
 contract SuavePokerTable {
     uint public smallBlind;
@@ -10,6 +12,9 @@ contract SuavePokerTable {
     uint public maxBuyin;
     bool public initComplete;
     address[] addressList;
+
+    // For the RNG
+    Suave.DataId private rngRef;
 
     // PlayerState - put into some kind of array of structs?
     // P1
@@ -84,6 +89,7 @@ contract SuavePokerTable {
     }
 
     function initTableCallback(
+        Suave.DataId _rngRef,
         Suave.DataId _button,
         Suave.DataId _handStage,
         Suave.DataId _whoseTurn,
@@ -93,6 +99,7 @@ contract SuavePokerTable {
     ) public payable {
         initComplete = true;
         console.log("initTableCallback called...");
+        rngRef = _rngRef;
         button = _button;
         handStage = _handStage;
         whoseTurn = _whoseTurn;
@@ -106,12 +113,6 @@ contract SuavePokerTable {
         uint8 seat,
         uint stack
     ) public payable {
-        console.log("JoinTableCallback.. address.");
-        console.log(player);
-        console.log("Seat");
-        console.log(seat);
-        console.log("Stack");
-        console.log(stack);
         emit PlayerJoined(player, seat, stack);
     }
 
@@ -144,6 +145,15 @@ contract SuavePokerTable {
     }
 
     function initTable() external returns (bytes memory) {
+        Suave.DataRecord memory rng = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+        // As part of initialization - have to initialize seed to some value
+        RNG.storeSeed(rng.id, 123456);
+
         Suave.DataRecord memory button = Suave.newDataRecord(
             0,
             addressList,
@@ -189,6 +199,7 @@ contract SuavePokerTable {
         return
             abi.encodeWithSelector(
                 this.initTableCallback.selector,
+                rng.id,
                 button.id,
                 handStage.id,
                 whoseTurn.id,
@@ -297,6 +308,11 @@ contract SuavePokerTable {
         require(_getPlayer(seat) == address(0));
         // Make sure their deposit amount is in bounds
         require(_depositOk(depositAmount));
+
+        // They must also to pass in a random number to seed the RNG
+        bytes memory randBytes = Context.confidentialInputs();
+        uint noise = abi.decode(randBytes, (uint));
+        RNG.addNoise(rngRef, noise);
 
         Suave.DataId playerAddr;
         Suave.DataId stack;
