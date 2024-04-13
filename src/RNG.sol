@@ -18,9 +18,9 @@ library RNG {
     ) internal returns (uint) {
         bytes memory seed = getSeed(ref);
         // By combining seed with some other value and hashing it, we get a random number
-        // and it should not be possible to reverse engineeer the seed because it changes each call?
+        // and it should not be possible to reverse engineeer the seed because sequence will change
         uint randomNumber = uint256(
-            keccak256(abi.encodePacked(seed, msg.sender))
+            keccak256(abi.encodePacked(seed, block.timestamp))
         );
 
         // Keep updating seed for next random number generation
@@ -28,7 +28,10 @@ library RNG {
         storeSeed(ref, abi.encode(newSeed));
         return randomNumber % maxValue;
     }
-
+    /**
+     * @notice Combines current seed with noise to generate a new seed
+     * @dev Must have at least two independent parties call this to have security
+     */
     function addNoise(Suave.DataId ref, bytes memory noise) internal {
         bytes memory seed = getSeed(ref);
         bytes32 newSeed = keccak256(abi.encodePacked(seed, noise));
