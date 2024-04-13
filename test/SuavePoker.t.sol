@@ -8,6 +8,7 @@ import "forge-std/console.sol";
 import "suave-std/Context.sol";
 
 import {SuavePokerTable} from "../src/SuavePoker.sol";
+import {ISuavePokerTable} from "../src/interfaces/ISuavePoker.sol";
 
 // Contract with all internal methods exposed
 contract SuavePokerTableHarness is SuavePokerTable {
@@ -25,32 +26,70 @@ contract SuavePokerTableHarness is SuavePokerTable {
     function exposed_getPlayer(uint8 seat) external returns (address) {
         return _getPlayer(seat);
     }
+
+    function exposed_transitionHandState(
+        HandState memory handStateCurr,
+        Action memory action
+    ) external returns (HandState memory) {
+        return _transitionHandState(handStateCurr, action);
+    }
 }
 
-contract TestSuavePoker is Test, SuaveEnabled {
+contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
+    /*
     event PlayerJoined(address player, uint8 seat, uint stack);
 
+    enum HandStage {
+        SBPost,
+        BBPost,
+        DealHolecards,
+        PreflopBetting,
+        FlopDeal,
+        FlopBetting,
+        TurnDeal,
+        TurnBetting,
+        RiverDeal,
+        RiverBetting,
+        Showdown,
+        Settle
+    }
+    enum ActionType {
+        Bet, // Bet will include Raise - should be total amount bet on that street
+        Fold,
+        Call,
+        Check
+    }
+
+    struct Action {
+        uint256 amount;
+        ActionType act;
+    }
+
+    struct HandState {
+        HandStage handStage;
+        uint8 whoseTurn;
+        Action[] actionList;
+        uint[] boardCards;
+        uint pot;
+        bool handOver;
+        uint facingBet;
+        uint lastRaise;
+    }
+    */
+
     function testInsertOrder() public {
-        // Initializing library
-        // No contract, just test library functionality
-        address[] memory addressList;
-        addressList = new address[](1);
-        addressList[0] = 0xC8df3686b4Afb2BB53e60EAe97EF043FE03Fb829;
+        // 1/2 game with buyin of 20-200
 
-        // --------------------
-
-        uint _smallBlind = 1;
-        uint _bigBlind = 2;
-        uint _minBuyin = 20;
-        uint _maxBuyin = 200;
-
+        uint smallBlind = 1;
+        uint bigBlind = 2;
+        uint minBuyin = 20;
+        uint maxBuyin = 200;
         SuavePokerTableHarness spt = new SuavePokerTableHarness(
-            _smallBlind,
-            _bigBlind,
-            _minBuyin,
-            _maxBuyin
+            smallBlind,
+            bigBlind,
+            minBuyin,
+            maxBuyin
         );
-
         assertFalse(spt.initComplete());
 
         // For initialization - we have to initialize both players and table
@@ -64,8 +103,10 @@ contract TestSuavePoker is Test, SuaveEnabled {
         address(spt).call(o2);
 
         assertTrue(spt.initComplete());
-        assertEq(spt.smallBlind(), _smallBlind);
-        assertEq(spt.bigBlind(), _bigBlind);
+        assertEq(spt.smallBlind(), smallBlind);
+        assertEq(spt.bigBlind(), bigBlind);
+        assertEq(spt.minBuyin(), minBuyin);
+        assertEq(spt.maxBuyin(), maxBuyin);
 
         uint seed = 123;
         bytes memory input = abi.encode(seed);
@@ -96,27 +137,41 @@ contract TestSuavePoker is Test, SuaveEnabled {
     }
 
     function testValidTurn() public {
-        // Initializing library
-        // No contract, just test library functionality
-        address[] memory addressList;
-        addressList = new address[](1);
-        addressList[0] = 0xC8df3686b4Afb2BB53e60EAe97EF043FE03Fb829;
-
-        // --------------------
-
-        uint _smallBlind = 1;
-        uint _bigBlind = 2;
-        uint _minBuyin = 20;
-        uint _maxBuyin = 200;
-
-        SuavePokerTableHarness spt = new SuavePokerTableHarness(
-            _smallBlind,
-            _bigBlind,
-            _minBuyin,
-            _maxBuyin
-        );
-
+        // 1/2 game with buyin of 20-200
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
+        assertFalse(spt.initComplete());
         bool success = spt.exposed_validTurn(address(0));
         assertTrue(success);
+    }
+
+    function testTransitionHandState() public {
+        // 1/2 game with buyin of 20-200
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
+
+        ActionType actType = ActionType.Bet;
+        Action memory action = Action(100, actType);
+
+        HandStage handStage = HandStage.FlopBetting;
+        Action[] memory actionList = new Action[](1);
+        uint[] memory boardCards = new uint[](1);
+
+        HandState memory handStateCurr = HandState({
+            handStage: handStage,
+            whoseTurn: 0,
+            actionList: actionList,
+            boardCards: boardCards,
+            pot: 2,
+            handOver: false,
+            facingBet: 0,
+            lastRaise: 0,
+            stack: 100,
+            inHand: true,
+            playerBetStreet: 0
+        });
+
+        HandState memory handStateNew = spt.exposed_transitionHandState(
+            handStateCurr,
+            action
+        );
     }
 }
