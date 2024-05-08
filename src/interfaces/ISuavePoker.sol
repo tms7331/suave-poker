@@ -7,7 +7,7 @@ interface ISuavePokerTable {
     enum HandStage {
         SBPost,
         BBPost,
-        DealHolecards,
+        HolecardsDeal,
         PreflopBetting,
         FlopDeal,
         FlopBetting,
@@ -19,6 +19,9 @@ interface ISuavePokerTable {
         Settle
     }
     enum ActionType {
+        Null, // Means no betting on current street - NOT an action players can take
+        SBPost,
+        BBPost,
         Bet, // Bet will include Raise - should be total amount bet on that street
         Fold,
         Call,
@@ -30,18 +33,24 @@ interface ISuavePokerTable {
         ActionType act;
     }
 
+    // General state of the hand
     struct HandState {
         HandStage handStage;
-        uint8 whoseTurn;
-        Action[] actionList;
-        uint[] boardCards;
+        Action lastAction;
         uint pot;
         bool handOver;
+        // These will be more important for multiway
         uint facingBet;
         uint lastRaise;
-        // Values for the player whose turn it is
+        uint8 button;
+    }
+
+    // State specific to the player whose turn it is
+    struct PlayerState {
+        uint8 whoseTurn;
         uint stack;
         bool inHand;
         uint playerBetStreet;
+        uint oppBetStreet;
     }
 }

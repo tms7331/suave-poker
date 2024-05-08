@@ -17,7 +17,7 @@ contract SuavePokerTable is ISuavePokerTable {
     // For the RNG
     Suave.DataId private rngRef;
 
-    // PlayerState - put into some kind of array of structs?
+    // Full PlayerState - put into some kind of array of structs?
     // P1
     Suave.DataId private playerAddrId0;
     Suave.DataId private stackId0;
@@ -37,17 +37,23 @@ contract SuavePokerTable is ISuavePokerTable {
 
     // TableState
     Suave.DataId private buttonId; // uint8
+    Suave.DataId private whoseTurnId; // uint8
 
     // HandState
     Suave.DataId private handStageId; // HandStage enum
-    Suave.DataId private whoseTurnId; // uint8 - really 0 or 1
-    Suave.DataId private actionListId; // Array of Actions
-    Suave.DataId private boardCardsId; // len 5 array of cards (uint 0 to 51)
+    Suave.DataId private lastActionId; // uint
     Suave.DataId private potId; // uint
     Suave.DataId private handOverId; // bool
     // these two should be reset every street
     Suave.DataId private facingBetId; // uint - biggest bet size (total bet amount) on a street
     Suave.DataId private lastRaiseId; // uint - last difference between bets
+    // Extra state for cards - should reset every hand
+    Suave.DataId private cardBitsId; // uint8
+    // Not using these currently - do we need them?
+    Suave.DataId private actionListId; // Array of Actions
+    Suave.DataId private boardCardsId; // len 5 array of cards (uint 0 to 51)
+
+    event CardEvent(uint8 cardI);
 
     constructor(
         uint _smallBlind,
@@ -69,24 +75,29 @@ contract SuavePokerTable is ISuavePokerTable {
         Suave.DataId _rngRef,
         Suave.DataId _buttonId,
         Suave.DataId _handStageId,
+        Suave.DataId _lastActionId,
         Suave.DataId _whoseTurnId,
         Suave.DataId _actionListId,
         Suave.DataId _potId,
         Suave.DataId _handOverId,
         Suave.DataId _facingBetId,
-        Suave.DataId _lastRaiseId
+        Suave.DataId _lastRaiseId,
+        Suave.DataId _cardBitsId
     ) public payable {
         initComplete = true;
         console.log("initTableCallback called...");
         rngRef = _rngRef;
         buttonId = _buttonId;
         handStageId = _handStageId;
+        lastActionId = _lastActionId;
         whoseTurnId = _whoseTurnId;
         actionListId = _actionListId;
         potId = _potId;
         handOverId = _handOverId;
         facingBetId = _facingBetId;
         lastRaiseId = _lastRaiseId;
+        cardBitsId = _cardBitsId;
+        console.log("initTableCallback done...");
     }
 
     function joinTableCallback(
@@ -98,7 +109,7 @@ contract SuavePokerTable is ISuavePokerTable {
     }
 
     function initPlayerCallback(
-        uint whichPlayer,
+        uint playerI,
         Suave.DataId _playerAddr,
         Suave.DataId _stack,
         Suave.DataId _inHand,
@@ -109,7 +120,7 @@ contract SuavePokerTable is ISuavePokerTable {
     ) public payable {
         console.log("initPlayerCallback called...");
 
-        if (whichPlayer == 0) {
+        if (playerI == 0) {
             playerAddrId0 = _playerAddr;
             stackId0 = _stack;
             inHandId0 = _inHand;
@@ -117,7 +128,7 @@ contract SuavePokerTable is ISuavePokerTable {
             autoPostId0 = _autoPost;
             sittingOutId0 = _sittingOut;
             playerBetStreetId0 = _playerBetStreet;
-        } else if (whichPlayer == 1) {
+        } else if (playerI == 1) {
             playerAddrId1 = _playerAddr;
             stackId1 = _stack;
             inHandId1 = _inHand;
@@ -145,6 +156,7 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint8(buttonIdRec.id, "button", 0);
 
         Suave.DataRecord memory handStageRec = Suave.newDataRecord(
             0,
@@ -152,6 +164,16 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setHandStage(handStageRec.id, "handStage", HandStage.SBPost);
+
+        Suave.DataRecord memory lastActionRec = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+        Action memory lastAction = Action(0, ActionType.Null);
+        _setLastAction(lastActionRec.id, "lastAction", lastAction);
 
         Suave.DataRecord memory whoseTurnRec = Suave.newDataRecord(
             0,
@@ -159,6 +181,7 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint8(whoseTurnRec.id, "whoseTurn", 0);
 
         Suave.DataRecord memory actionListRec = Suave.newDataRecord(
             0,
@@ -166,6 +189,8 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        // TODO - are we using the actionList?  If yes, initialize!
+        console.log("WARNING - not initializing actionList!");
 
         Suave.DataRecord memory potRec = Suave.newDataRecord(
             0,
@@ -173,6 +198,7 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint(potRec.id, "pot", 0);
 
         Suave.DataRecord memory handOverRec = Suave.newDataRecord(
             0,
@@ -180,6 +206,7 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setBool(handOverRec.id, "handOver", false);
 
         Suave.DataRecord memory facingBetRec = Suave.newDataRecord(
             0,
@@ -187,6 +214,7 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint(facingBetRec.id, "facingBet", 0);
 
         Suave.DataRecord memory lastRaiseRec = Suave.newDataRecord(
             0,
@@ -194,6 +222,15 @@ contract SuavePokerTable is ISuavePokerTable {
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint(lastRaiseRec.id, "lastRaise", 0);
+
+        Suave.DataRecord memory cardBitsRec = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+        _setUint64(cardBitsRec.id, "cardBits", 0);
 
         return
             abi.encodeWithSelector(
@@ -201,89 +238,94 @@ contract SuavePokerTable is ISuavePokerTable {
                 rngRec.id,
                 buttonIdRec.id,
                 handStageRec.id,
+                lastActionRec.id,
                 whoseTurnRec.id,
                 actionListRec.id,
                 potRec.id,
                 handOverRec.id,
                 facingBetRec.id,
-                lastRaiseRec.id
+                lastRaiseRec.id,
+                cardBitsRec.id
             );
     }
 
-    function initPlayer(uint whichPlayer) external returns (bytes memory) {
+    function initPlayer(uint playerI) external returns (bytes memory) {
         // Have to call this for each player
         require(!initComplete, "Table already initialized");
         // We have to initailize private store with variables
         // Make sure we only init once...
         // For the array
 
-        Suave.DataRecord memory playerAddr = Suave.newDataRecord(
+        Suave.DataRecord memory playerAddrRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        // This is just initialization, not joining, so set address to 0
+        _setAddr(playerAddrRec.id, "playerAddr", address(0));
 
-        Suave.DataRecord memory stack = Suave.newDataRecord(
+        Suave.DataRecord memory stackRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint(stackRec.id, "stack", 0);
 
-        Suave.DataRecord memory inHand = Suave.newDataRecord(
+        Suave.DataRecord memory inHandRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setBool(inHandRec.id, "inHand", false);
 
-        Suave.DataRecord memory cards = Suave.newDataRecord(
+        Suave.DataRecord memory cardsRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        // TODO - if we're going to use this we need to set i...
+        console.log("WARNING - not initializing player cards!");
 
         // TODO - well need an array for this...
-        Suave.DataRecord memory autoPost = Suave.newDataRecord(
+        Suave.DataRecord memory autoPostRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setBool(autoPostRec.id, "autoPost", false);
 
-        Suave.DataRecord memory sittingOut = Suave.newDataRecord(
+        Suave.DataRecord memory sittingOutRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setBool(sittingOutRec.id, "sittingOut", false);
 
-        Suave.confidentialStore(
-            playerAddr.id,
-            "playerAddr",
-            abi.encode(address(0))
-        );
-
-        Suave.DataRecord memory playerBetStreet = Suave.newDataRecord(
+        Suave.DataRecord memory playerBetStreetRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
+        _setUint(playerBetStreetRec.id, "playerBetStreet", 0);
 
         return
             abi.encodeWithSelector(
                 this.initPlayerCallback.selector,
-                whichPlayer,
-                playerAddr.id,
-                stack.id,
-                inHand.id,
-                cards.id,
-                autoPost.id,
-                sittingOut.id,
-                playerBetStreet.id
+                playerI,
+                playerAddrRec.id,
+                stackRec.id,
+                inHandRec.id,
+                cardsRec.id,
+                autoPostRec.id,
+                sittingOutRec.id,
+                playerBetStreetRec.id
             );
     }
 
@@ -368,7 +410,7 @@ contract SuavePokerTable is ISuavePokerTable {
             );
     }
 
-    function leaveGame(uint8 seat) external returns (bytes memory) {
+    function leaveTable(uint8 seat) external returns (bytes memory) {
         // Force players to pass in seat?  Or should we scan for it?
         require(_getPlayer(seat) == msg.sender);
 
@@ -409,7 +451,7 @@ contract SuavePokerTable is ISuavePokerTable {
         return abi.encodeWithSelector(this.nullCallback.selector);
     }
 
-    function rebuy(uint depositAmount) public {
+    function rebuy(uint depositAmount) external {
         // TODO -
         // Issue is we need to process rebuys in between hands
         // This is NOT the same as an initial deposit...
@@ -425,15 +467,11 @@ contract SuavePokerTable is ISuavePokerTable {
         // balances[player] += depositAMount;
     }
 
-    function withdraw() public {
+    function _withdraw() internal {
         require(initComplete, "Table not initialized");
         // Force them to withdraw whole stack
         // TODO - should we also prevent ratholing?  Track when they left game?
         address player = msg.sender;
-    }
-
-    function getCard() internal pure returns (uint8) {
-        return 1;
     }
 
     function _validAmount() internal pure returns (bool) {
@@ -451,61 +489,55 @@ contract SuavePokerTable is ISuavePokerTable {
 
     function _transitionHandState(
         HandState memory hs,
+        PlayerState memory ps,
         Action memory action
-    ) internal pure returns (HandState memory) {
-        HandState memory handStateNew;
-
-        // Stack too deep, need to refactor this
-        /*
-        // We'll need to set all of these values
-        // Player values
-        uint stackNew;
-        bool inHandNew = true; // always true unless they fold
-        uint playerBetStreetNew;
-        // HandState values
-        HandStage handStageNew = hs.handStage;
-        uint8 whoseTurnNew;
-        // TODO - just append action here?
-        Action[] memory actionListNew = new Action[](2); // .append(action);
-        uint[] memory boardCardsNew = new uint[](2); // .append(action);
-
-        uint potNew = hs.pot;
-        bool handOverNew = false; // only true if fold or hand ends
-        uint facingBetNew = 0;
-        uint lastRaiseNew = 0;
+    ) internal pure returns (HandState memory, PlayerState memory) {
+        // Is it safe to overwrite them as we go?
+        PlayerState memory playerStateNew = ps;
+        HandState memory handStateNew = hs;
 
         // action consists of amount and act...
-        if (action.act == ActionType.Bet) {
-            uint betAmountNew = action.amount - hs.playerBetStreet;
-            stackNew = hs.stack - betAmountNew;
-            playerBetStreetNew = action.amount;
+        if (action.act == ActionType.SBPost) {
+            ps.stack = ps.stack - action.amount;
+            hs.handStage = HandStage.BBPost;
+            ps.playerBetStreet = action.amount;
+            hs.pot = hs.pot + action.amount;
+        } else if (action.act == ActionType.BBPost) {
+            ps.stack = ps.stack - action.amount;
+            hs.handStage = HandStage.HolecardsDeal;
+            ps.playerBetStreet = action.amount;
+            hs.pot = hs.pot + action.amount;
+        } else if (action.act == ActionType.Bet) {
+            uint betAmountNew = action.amount - ps.playerBetStreet;
+            ps.stack = ps.stack - betAmountNew;
+            ps.playerBetStreet = action.amount;
             // handStageNew = handStageCurr;  // Betting cannot end street action
-            potNew = hs.pot + betAmountNew;
-            facingBetNew = action.amount;
-            lastRaiseNew = hs.playerBetStreet - hs.facingBet;
+            hs.pot = hs.pot + betAmountNew;
+            hs.facingBet = action.amount;
+            hs.lastRaise = ps.playerBetStreet - hs.facingBet;
         } else if (action.act == ActionType.Fold) {
             // stackNew =
-            inHandNew = false;
+            ps.inHand = false;
             // playerBetStreetNew = 0;  // this will be reset?
-            handStageNew = HandStage.Settle;
+            hs.handStage = HandStage.Settle;
             // potNew =
-            handOverNew = true;
-            facingBetNew = 0;
-            lastRaiseNew = 0;
+            hs.handOver = true;
+            hs.facingBet = 0;
+            hs.lastRaise = 0;
         } else if (action.act == ActionType.Call) {
             // Just the call amount
-            uint callAmountNew = facingBetNew - hs.playerBetStreet;
+            uint callAmountNew = hs.facingBet - ps.playerBetStreet;
             // Total bet amount
-            uint betAmountNew = facingBetNew;
+            uint betAmountNew = hs.facingBet;
 
-            stackNew = hs.stack - callAmountNew;
-            playerBetStreetNew = hs.stack - callAmountNew;
+            ps.stack = ps.stack - callAmountNew;
+            ps.playerBetStreet = ps.stack - callAmountNew;
             // TODO - some subtleties because preflop it won't close action
             // handStageNew = ??? depends on action!!!
-            potNew = hs.pot + callAmountNew;
-            facingBetNew = hs.facingBet;
+            hs.pot = hs.pot + callAmountNew;
+            hs.facingBet = hs.facingBet;
             // TODO - Think this is wrong in multiplayer
-            lastRaiseNew = 0;
+            hs.lastRaise = 0;
         } else if (action.act == ActionType.Check) {
             // Stack stays the same, other player's turn...
             // TODO - again subtleties with preflop...
@@ -518,73 +550,185 @@ contract SuavePokerTable is ISuavePokerTable {
             // streetOver = ???????
         }
 
-        // TODO - add logic
-        // These are dependent on whether the betting round is complete
-        whoseTurnNew = 1;
-        whoseTurnNew = 0;
+        // TODO - update whose turn it is, dependent on whether betting round is over
+        // whoseTurnNew = 1;
+        // whoseTurnNew = 0;
 
-        HandState memory handStateNew = HandState({
-            handStage: handStageNew,
-            whoseTurn: whoseTurnNew,
-            actionList: actionListNew,
-            boardCards: boardCardsNew,
-            pot: potNew,
-            handOver: handOverNew,
-            facingBet: facingBetNew,
-            lastRaise: lastRaiseNew,
-            stack: stackNew,
-            inHand: inHandNew,
-            playerBetStreet: playerBetStreetNew
-        });
-        */
-        return handStateNew;
+        return (handStateNew, playerStateNew);
     }
 
-    function takeAction(Action calldata action) public {
-        require(initComplete, "Table not initialized");
-        // Ensure validitity of action
-        require(_validTurn(msg.sender), "Invalid Turn");
-        require(_validAction(action), "Invalid action");
-        require(_validAmount(), "Invalid bet amount");
-        // require(_validStreet(), "Game is over");
+    function _getNewCards(uint numCards) internal returns (uint8[] memory) {
+        // Return cards between 1 and 52 -
+        // Avoid zero indexing because the Solidity default is 0 so it can cause
+        // issues with non-ambiguous representation
+        uint8[] memory retCards = new uint8[](numCards);
+        uint64 oldBits = _getUint64(cardBitsId, "cardBits");
+        uint64 newBits = 0;
+        while (newBits == 0) {
+            uint randNum = RNG.generateRandomNumber(rngRef, 52) + 1;
+            uint64 bits = uint64(2 ** (randNum));
+            newBits = bits | oldBits;
+        }
+        _setUint64(cardBitsId, "cardBits", newBits);
+        return retCards;
+    }
 
-        // If we've made it here the action is valid - transition to next gamestate
-        // Now determine gamestate transition... what happens next?
-        HandState memory handStateCurr = getHandState();
-        HandState memory handStateNew = _transitionHandState(
-            handStateCurr,
-            action
-        );
-        updateHandState(handStateNew);
-
-        // Check to see if hand is over after each action?
-        if (handStateNew.handOver) {
-            _showdown();
+    function showCardsCallback(uint8[] memory retCards) public payable {
+        for (uint256 i = 0; i < retCards.length; i++) {
+            // console.log(_fills[i].amount, _fills[i].price);
+            emit CardEvent(retCards[i]);
         }
     }
 
-    function _showdown() internal {
+    function takeAction(
+        Action calldata action
+    ) external returns (bytes memory) {
+        console.log("Taking action!");
+        require(initComplete, "Table not initialized");
+        // Ensure validitity of action
+        require(_validAction(action), "Invalid action");
+        require(_validAmount(), "Invalid bet amount");
+
+        // If we've made it here the action is valid - transition to next gamestate
+        // Now determine gamestate transition... what happens next?
+        console.log("Getting hand state...");
+        HandState memory handStateCurr = _getHandState();
+        console.log("Getting player state...");
+        PlayerState memory playerStateCurr = _getPlayerState();
+
+        uint playerI = playerStateCurr.whoseTurn;
+        require(_validTurn(msg.sender), "Invalid Turn");
+
+        HandState memory handStateNew;
+        PlayerState memory playerStateNew;
+        console.log("Making state transition");
+        (handStateNew, playerStateNew) = _transitionHandState(
+            handStateCurr,
+            playerStateCurr,
+            action
+        );
+
+        // Temporary - in future cards will be emitted via API precompile
+        uint8[] memory retCards = new uint8[](4);
+
+        if (handStateNew.handStage == HandStage.HolecardsDeal) {
+            uint8[] memory p0Cards = _getNewCards(2);
+            uint8[] memory p1Cards = _getNewCards(2);
+            retCards[0] = p0Cards[0];
+            retCards[1] = p0Cards[1];
+            retCards[2] = p1Cards[0];
+            retCards[3] = p1Cards[1];
+
+            // And we need to progress handstate
+            handStateNew.handStage = HandStage.PreflopBetting;
+
+            // Deal cards
+            // Deal cards to players
+            // Deal cards to board
+            // Update hand state
+        } else if (handStateNew.handStage == HandStage.FlopDeal) {
+            uint8[] memory flop = _getNewCards(3);
+            retCards[0] = flop[0];
+            retCards[1] = flop[1];
+            retCards[2] = flop[2];
+            // And we need to progress handstate
+            handStateNew.handStage = HandStage.FlopBetting;
+        } else if (handStateNew.handStage == HandStage.TurnDeal) {
+            uint8[] memory turn = _getNewCards(1);
+            retCards[0] = turn[0];
+            // And we need to progress handstate
+            handStateNew.handStage = HandStage.TurnBetting;
+        } else if (handStateNew.handStage == HandStage.RiverDeal) {
+            uint8[] memory river = _getNewCards(1);
+            retCards[0] = river[0];
+            // And we need to progress handstate
+            handStateNew.handStage = HandStage.RiverBetting;
+        }
+
+        _updateHandState(handStateNew);
+        _updatePlayerState(playerI, playerStateNew);
+
+        // Check to see if hand is over after each action?
+        if (handStateNew.handOver) {
+            _showdown(handStateNew);
+        }
+
+        return
+            abi.encodeWithSelector(this.showCardsCallback.selector, retCards);
+    }
+
+    function _showdown(HandState memory hs) internal {
         // Should be called automatically when hand is over
+
+        uint lookup0 = _getLookupVals(0);
+        uint lookup1 = _getLookupVals(1);
+
+        // Calling 'settle' will update player stacks
+        if (lookup0 > lookup1) {
+            _settle(hs.pot, 0);
+        } else if (lookup1 > lookup0) {
+            _settle(hs.pot, 1);
+        } else {
+            _settle(hs.pot / 2, 0);
+            _settle(hs.pot / 2, 1);
+        }
+        // Update state so next hand can start
+        _nextHand(hs.button);
     }
-    function _showCards() internal {
+
+    function _getLookupVals(uint8 playerI) internal returns (uint) {
         // Emit them?
+        return 33;
     }
 
-    function _settle(uint pot, address winner) internal {
-        // Credit pot to winner...
+    function _settle(uint pot, uint8 playerI) internal {
+        // Credit pot to winner
+        // Pass in values instead to avoid multiple calls?
+        if (playerI == 0) {
+            uint stack = _getUint(stackId0, "stack");
+            uint stackNew = stack + pot;
+            _setUint(stackId0, "stack", stackNew);
+        } else if (playerI == 1) {
+            uint stack = _getUint(stackId1, "stack");
+            uint stackNew = stack + pot;
+            _setUint(stackId1, "stack", stackNew);
+        }
     }
 
-    function _resetHand() internal {
-        // Alternate button
-        // And reset all HandState params...
-        // Suave.DataId private handStageId; // HandStage enum
-        // Suave.DataId private whoseTurnId; // uint8 - really 0 or 1
-        // Suave.DataId private actionListId; // Array of Actions
-        // Suave.DataId private potId; // uint
-        // Suave.DataId private handOverId; // bool
+    function _nextHand(uint8 buttonCurr) internal {
+        // Set logic so when we extend to more players, logic will still work
+        uint8 numPlayers = 2;
+
+        // button should move around table
+        uint8 buttonNew = (buttonCurr + 1) % numPlayers;
+        // player to act should be UTG
+        uint8 utgNew = (buttonNew + 1) % numPlayers;
+        _setUint8(buttonId, "button", buttonNew);
+        _setUint8(whoseTurnId, "whoseTurn", utgNew);
+
+        _setHandStage(handStageId, "handStage", HandStage.SBPost);
+        Action memory lastAction = Action(0, ActionType.Null);
+        _setLastAction(lastActionId, "lastAction", lastAction);
+        _setUint(potId, "pot", 0);
+        _setBool(handOverId, "handOver", false);
+        _setUint(facingBetId, "facingBet", 0);
+        _setUint(lastRaiseId, "lastRaise", 0);
+        _setUint64(cardBitsId, "cardBits", 0);
+
+        _setUint64(playerBetStreetId0, "playerBetStreet", 0);
+        _setUint64(playerBetStreetId1, "playerBetStreet", 0);
     }
 
     // Helper functions for setting values
+
+    function _setAddr(
+        Suave.DataId key,
+        string memory keyStr,
+        address addr
+    ) internal {
+        Suave.confidentialStore(key, keyStr, abi.encode(addr));
+    }
+
     function _setUint(
         Suave.DataId key,
         string memory keyStr,
@@ -597,6 +741,14 @@ contract SuavePokerTable is ISuavePokerTable {
         Suave.DataId key,
         string memory keyStr,
         uint8 newAmount
+    ) internal {
+        Suave.confidentialStore(key, keyStr, abi.encode(newAmount));
+    }
+
+    function _setUint64(
+        Suave.DataId key,
+        string memory keyStr,
+        uint64 newAmount
     ) internal {
         Suave.confidentialStore(key, keyStr, abi.encode(newAmount));
     }
@@ -615,6 +767,14 @@ contract SuavePokerTable is ISuavePokerTable {
         HandStage newHandStage
     ) internal {
         Suave.confidentialStore(key, keyStr, abi.encode(newHandStage));
+    }
+
+    function _setLastAction(
+        Suave.DataId key,
+        string memory keyStr,
+        Action memory lastAction
+    ) internal {
+        Suave.confidentialStore(key, keyStr, abi.encode(lastAction));
     }
 
     // Helper functions for getting values
@@ -637,6 +797,15 @@ contract SuavePokerTable is ISuavePokerTable {
         return vald;
     }
 
+    function _getUint64(
+        Suave.DataId key,
+        string memory keyStr
+    ) internal returns (uint64) {
+        bytes memory val = Suave.confidentialRetrieve(key, keyStr);
+        uint64 vald = abi.decode(val, (uint64));
+        return vald;
+    }
+
     function _getBool(
         Suave.DataId key,
         string memory keyStr
@@ -655,65 +824,95 @@ contract SuavePokerTable is ISuavePokerTable {
         return vald;
     }
 
-    function getHandState() internal returns (HandState memory) {
-        HandStage handStage = _getHandStage(handStageId, "handStage");
-        uint8 whoseTurn = _getUint8(whoseTurnId, "whoseTurn");
-        Action[] memory actionList = new Action[](1);
-        uint[] memory boardCards = new uint[](1);
-        uint pot = _getUint(potId, "pot");
-        bool handOver = _getBool(handOverId, "handOver");
-        uint facingBet = _getUint(facingBetId, "facingBet");
-        uint lastRaise = _getUint(lastRaiseId, "lastRaise");
+    function _getLastAction(
+        Suave.DataId key,
+        string memory keyStr
+    ) internal returns (Action memory) {
+        bytes memory val = Suave.confidentialRetrieve(key, keyStr);
+        Action memory vald = abi.decode(val, (Action));
+        return vald;
+    }
 
+    function _getPlayerState() internal returns (PlayerState memory) {
+        uint8 whoseTurn = _getUint8(whoseTurnId, "whoseTurn");
         uint stack;
         bool inHand;
         uint playerBetStreet;
+        uint oppBetStreet;
         if (whoseTurn == 0) {
             stack = _getUint(stackId0, "stack");
             inHand = _getBool(inHandId0, "inHand");
             playerBetStreet = _getUint(playerBetStreetId0, "playerBetStreet");
+            oppBetStreet = _getUint(playerBetStreetId1, "playerBetStreet");
         } else if (whoseTurn == 1) {
             stack = _getUint(stackId1, "stack");
             inHand = _getBool(inHandId1, "inHand");
             playerBetStreet = _getUint(playerBetStreetId1, "playerBetStreet");
+            oppBetStreet = _getUint(playerBetStreetId0, "playerBetStreet");
         }
+
+        PlayerState memory playerState = PlayerState({
+            whoseTurn: whoseTurn,
+            stack: stack,
+            inHand: inHand,
+            playerBetStreet: playerBetStreet,
+            oppBetStreet: oppBetStreet
+        });
+        return playerState;
+    }
+
+    function _updatePlayerState(uint playerI, PlayerState memory ps) internal {
+        // We should NOT rely on 'whoseTurn' here for setting basic player values
+        _setUint8(whoseTurnId, "whoseTurn", ps.whoseTurn);
+        if (playerI == 0) {
+            _setUint(stackId0, "stack", ps.stack);
+            _setBool(inHandId0, "inHand", ps.inHand);
+            _setUint(playerBetStreetId0, "playerBetStreet", ps.playerBetStreet);
+        } else if (playerI == 1) {
+            _setUint(stackId1, "stack", ps.stack);
+            _setBool(inHandId1, "inHand", ps.inHand);
+            _setUint(playerBetStreetId1, "playerBetStreet", ps.playerBetStreet);
+        }
+    }
+
+    function _getHandState() internal returns (HandState memory) {
+        HandStage handStage = _getHandStage(handStageId, "handStage");
+        Action memory lastAction = _getLastAction(lastActionId, "lastAction");
+        uint pot = _getUint(potId, "pot");
+        bool handOver = _getBool(handOverId, "handOver");
+        // Action[] memory actionList = new Action[](1);
+        // uint[] memory boardCards = new uint[](1);
+        uint facingBet = _getUint(facingBetId, "facingBet");
+        uint lastRaise = _getUint(lastRaiseId, "lastRaise");
+        uint8 button = _getUint8(buttonId, "button");
 
         // Return all the hand state variables
         HandState memory handState = HandState({
             handStage: handStage,
-            whoseTurn: whoseTurn,
-            actionList: actionList,
-            boardCards: boardCards,
+            lastAction: lastAction,
             pot: pot,
             handOver: handOver,
             facingBet: facingBet,
             lastRaise: lastRaise,
-            stack: stack,
-            inHand: inHand,
-            playerBetStreet: playerBetStreet
+            button: button
         });
         return handState;
     }
 
-    function updateHandState(HandState memory hs) internal {
+    function _updateHandState(HandState memory hs) internal {
+        // HandStage handStage;
+        // Action lastAction;
+        // uint pot;
+        // bool handOver;
+        // uint facingBet;
+        // uint lastRaise;
         _setHandStage(handStageId, "handStage", hs.handStage);
-        _setUint8(whoseTurnId, "whoseTurn", hs.whoseTurn);
-        Action[] memory actionList = new Action[](1);
-        uint[] memory boardCards = new uint[](1);
+        _setLastAction(lastActionId, "lastAction", hs.lastAction);
         _setUint(potId, "pot", hs.pot);
         _setBool(handOverId, "handOver", hs.handOver);
         _setUint(facingBetId, "facingBet", hs.facingBet);
         _setUint(lastRaiseId, "lastRaise", hs.lastRaise);
-
-        // TODO - have to conditionally set the other values
-        if (hs.whoseTurn == 0) {
-            // stack = _getUint(stackId0, "stack");
-            // inHand = _getBool(inHandId0, "inHand");
-            // playerBetStreet = _getUint(playerBetStreetId0, "playerBetStreet");
-        } else if (hs.whoseTurn == 1) {
-            // stack = _getUint(stackId1, "stack");
-            // inHand = _getBool(inHandId1, "inHand");
-            // playerBetStreet = _getUint(playerBetStreetId1, "playerBetStreet");
-        }
+        // We don't need to set this because it only changes between hands...
+        _setUint8(buttonId, "button", hs.button);
     }
 }
