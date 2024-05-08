@@ -498,61 +498,166 @@ contract SuavePokerTable is ISuavePokerTable {
 
         // action consists of amount and act...
         if (action.act == ActionType.SBPost) {
-            ps.stack = ps.stack - action.amount;
+            // When a player posts the SB, it should affect:
+            // -- HandState values:
+            // HandStage handStage;
+            // Action lastAction;
+            // uint pot;
+            // uint facingBet;
+            // uint lastRaise;
+            // -- PlayerState values:
+            // uint8 whoseTurn;
+            // uint stack;
+            // uint playerBetStreet;
             hs.handStage = HandStage.BBPost;
-            ps.playerBetStreet = action.amount;
+            hs.lastAction = action;
             hs.pot = hs.pot + action.amount;
-        } else if (action.act == ActionType.BBPost) {
+            hs.facingBet = action.amount;
+            hs.lastRaise = action.amount;
+            // TODO - hardcoded for 2 players...
+            ps.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
             ps.stack = ps.stack - action.amount;
-            hs.handStage = HandStage.HolecardsDeal;
             ps.playerBetStreet = action.amount;
+        } else if (action.act == ActionType.BBPost) {
+            // When a player posts the BB, it should affect:
+            // -- HandState values:
+            // HandStage handStage;
+            // Action lastAction;
+            // uint pot;
+            // uint facingBet;
+            // uint lastRaise;
+            // -- PlayerState values:
+            // uint8 whoseTurn;
+            // uint stack;
+            // uint playerBetStreet;
+            hs.handStage = HandStage.HolecardsDeal;
+            hs.lastAction = action;
             hs.pot = hs.pot + action.amount;
+            hs.facingBet = action.amount;
+            hs.lastRaise = action.amount;
+            // -- PlayerState values:
+            ps.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
+            ps.stack = ps.stack - action.amount;
+            ps.playerBetStreet = action.amount;
         } else if (action.act == ActionType.Bet) {
+            // When a player bets, it should affect:
+            // -- HandState values:
+            // Action lastAction;
+            // uint pot;
+            // uint facingBet;
+            // uint lastRaise;
+            // -- PlayerState values:
+            // uint8 whoseTurn;
+            // uint stack;
+            // uint playerBetStreet;
+
+            // TODO - make this more general, currently hardcoded for 2 players
+            ps.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
             uint betAmountNew = action.amount - ps.playerBetStreet;
             ps.stack = ps.stack - betAmountNew;
             ps.playerBetStreet = action.amount;
-            // handStageNew = handStageCurr;  // Betting cannot end street action
+
+            hs.lastAction = action;
             hs.pot = hs.pot + betAmountNew;
             hs.facingBet = action.amount;
             hs.lastRaise = ps.playerBetStreet - hs.facingBet;
         } else if (action.act == ActionType.Fold) {
-            // stackNew =
+            // When a player folds, it should affect:
+            // -- HandState values:
+            // HandStage handStage;
+            // Action lastAction;
+            // -- PlayerState values:
+            // bool handOver;
+            // bool inHand;
+            hs.handStage = HandStage.Showdown;
+            hs.lastAction = action;
             ps.inHand = false;
-            // playerBetStreetNew = 0;  // this will be reset?
-            hs.handStage = HandStage.Settle;
-            // potNew =
             hs.handOver = true;
-            hs.facingBet = 0;
-            hs.lastRaise = 0;
         } else if (action.act == ActionType.Call) {
+            // When a player calls, it should affect:
+            // -- HandState values:
+            // HandStage handStage - possibly;
+            // Action lastAction
+            // uint pot;
+            // bool handOver - if it was a call all-in...;
+            // -- PlayerState values:
+            // uint8 whoseTurn;
+            // uint stack;
+            // uint playerBetStreet;
+
             // Just the call amount
             uint callAmountNew = hs.facingBet - ps.playerBetStreet;
             // Total bet amount
-            uint betAmountNew = hs.facingBet;
+            // uint betAmountNew = hs.facingBet;
 
-            ps.stack = ps.stack - callAmountNew;
-            ps.playerBetStreet = ps.stack - callAmountNew;
-            // TODO - some subtleties because preflop it won't close action
-            // handStageNew = ??? depends on action!!!
+            // TODO - think this is wrong...
             hs.pot = hs.pot + callAmountNew;
-            hs.facingBet = hs.facingBet;
-            // TODO - Think this is wrong in multiplayer
-            hs.lastRaise = 0;
-        } else if (action.act == ActionType.Check) {
-            // Stack stays the same, other player's turn...
-            // TODO - again subtleties with preflop...
-            // stackNew = stackCurr;
-            // playerBetStreetNew =
-            // handStageNew =
-            // potNew =
-            // facingBet = 0;
-            // lastRaise = 0;
-            // streetOver = ???????
-        }
+            ps.stack = ps.stack - callAmountNew;
+            ps.playerBetStreet = ps.playerBetStreet + callAmountNew;
 
-        // TODO - update whose turn it is, dependent on whether betting round is over
-        // whoseTurnNew = 1;
-        // whoseTurnNew = 0;
+            bool streetOver = ps.whoseTurn != hs.button;
+            if (streetOver) {
+                if (hs.handStage == HandStage.PreflopBetting) {
+                    hs.handStage = HandStage.FlopDeal;
+                } else if (hs.handStage == HandStage.FlopBetting) {
+                    hs.handStage = HandStage.TurnDeal;
+                } else if (hs.handStage == HandStage.TurnBetting) {
+                    hs.handStage = HandStage.RiverDeal;
+                } else if (hs.handStage == HandStage.RiverBetting) {
+                    hs.handStage = HandStage.Showdown;
+                }
+
+                // Need to reset this for the next street!
+                Action memory lastAction = Action(0, ActionType.Null);
+                hs.lastAction = lastAction;
+                // TODO - this is hardcoded for two players, this should actually
+                // be the UTG player
+                ps.whoseTurn = hs.button;
+            } else {
+                hs.lastAction = action;
+                uint8 numPlayers = 2;
+                ps.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
+            }
+        } else if (action.act == ActionType.Check) {
+            // When a player checks, it should affect:
+            // -- HandState values:
+            // HandStage handStage - possibly!
+            // Action lastAction;
+            // bool handOver - possibly!;
+            // -- PlayerState values:
+            // uint8 whoseTurn;
+
+            // If it's the last player to act (check based on button)
+            // and they check, onto next street...
+            bool streetOver = ps.whoseTurn != hs.button;
+
+            if (streetOver) {
+                // Is there not any way to increment the enum by 1?
+                // hs.handStage = hs.handStage + 1;
+                if (hs.handStage == HandStage.PreflopBetting) {
+                    hs.handStage = HandStage.FlopDeal;
+                } else if (hs.handStage == HandStage.FlopBetting) {
+                    hs.handStage = HandStage.TurnDeal;
+                } else if (hs.handStage == HandStage.TurnBetting) {
+                    hs.handStage = HandStage.RiverDeal;
+                } else if (hs.handStage == HandStage.RiverBetting) {
+                    hs.handStage = HandStage.Showdown;
+                }
+
+                // Seems kind of pointless?  Why do we need handOver
+                // if we have 'Showdown' handStage?
+                if (hs.handStage == HandStage.Showdown) {
+                    hs.handOver = true;
+                }
+                // TODO - this is hardcoded for two players, this should actually
+                // be the UTG player
+                ps.whoseTurn = hs.button;
+            } else {
+                uint8 numPlayers = 2;
+                ps.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
+            }
+            hs.lastAction = action;
+        }
 
         return (handStateNew, playerStateNew);
     }
@@ -650,18 +755,30 @@ contract SuavePokerTable is ISuavePokerTable {
 
         // Check to see if hand is over after each action?
         if (handStateNew.handOver) {
-            _showdown(handStateNew);
+            // So if player folded - other player wins
+            uint lookup0;
+            uint lookup1;
+            if (action.act == ActionType.Fold) {
+                // Lower is better, so give player who folded high number
+                lookup0 = playerI == 0 ? 1 : 0;
+                lookup1 = playerI == 1 ? 1 : 0;
+            } else {
+                lookup0 = _getLookupVals(0);
+                lookup1 = _getLookupVals(1);
+            }
+            _showdown(handStateNew, lookup0, lookup1);
         }
 
         return
             abi.encodeWithSelector(this.showCardsCallback.selector, retCards);
     }
 
-    function _showdown(HandState memory hs) internal {
+    function _showdown(
+        HandState memory hs,
+        uint lookup0,
+        uint lookup1
+    ) internal {
         // Should be called automatically when hand is over
-
-        uint lookup0 = _getLookupVals(0);
-        uint lookup1 = _getLookupVals(1);
 
         // Calling 'settle' will update player stacks
         if (lookup0 > lookup1) {
@@ -701,8 +818,10 @@ contract SuavePokerTable is ISuavePokerTable {
 
         // button should move around table
         uint8 buttonNew = (buttonCurr + 1) % numPlayers;
-        // player to act should be UTG
-        uint8 utgNew = (buttonNew + 1) % numPlayers;
+        // TODO - review this logic
+        // player to act should be UTG... button, SB, BB, UTG
+        // but if there are only 2 players, it's also SB?
+        uint8 utgNew = buttonNew; // (buttonNew + 2) % numPlayers;
         _setUint8(buttonId, "button", buttonNew);
         _setUint8(whoseTurnId, "whoseTurn", utgNew);
 
@@ -868,10 +987,14 @@ contract SuavePokerTable is ISuavePokerTable {
             _setUint(stackId0, "stack", ps.stack);
             _setBool(inHandId0, "inHand", ps.inHand);
             _setUint(playerBetStreetId0, "playerBetStreet", ps.playerBetStreet);
+            // We also need to update oppBetStreet - because if it's a new street
+            // that will go to 0...
+            _setUint(playerBetStreetId1, "playerBetStreet", ps.oppBetStreet);
         } else if (playerI == 1) {
             _setUint(stackId1, "stack", ps.stack);
             _setBool(inHandId1, "inHand", ps.inHand);
             _setUint(playerBetStreetId1, "playerBetStreet", ps.playerBetStreet);
+            _setUint(playerBetStreetId0, "playerBetStreet", ps.oppBetStreet);
         }
     }
 
