@@ -97,7 +97,6 @@ contract SuavePokerTable is ISuavePokerTable {
         facingBetId = _facingBetId;
         lastRaiseId = _lastRaiseId;
         cardBitsId = _cardBitsId;
-        console.log("initTableCallback done...");
     }
 
     function joinTableCallback(
@@ -493,8 +492,8 @@ contract SuavePokerTable is ISuavePokerTable {
         Action memory action
     ) internal pure returns (HandState memory, PlayerState memory) {
         // Is it safe to overwrite them as we go?
-        PlayerState memory playerStateNew = ps;
-        HandState memory handStateNew = hs;
+        PlayerState memory psNew = ps;
+        HandState memory hsNew = hs;
 
         // action consists of amount and act...
         if (action.act == ActionType.SBPost) {
@@ -509,15 +508,15 @@ contract SuavePokerTable is ISuavePokerTable {
             // uint8 whoseTurn;
             // uint stack;
             // uint playerBetStreet;
-            hs.handStage = HandStage.BBPost;
-            hs.lastAction = action;
-            hs.pot = hs.pot + action.amount;
-            hs.facingBet = action.amount;
-            hs.lastRaise = action.amount;
+            hsNew.handStage = HandStage.BBPost;
+            hsNew.lastAction = action;
+            hsNew.pot = hs.pot + action.amount;
+            hsNew.facingBet = action.amount;
+            hsNew.lastRaise = action.amount;
             // TODO - hardcoded for 2 players...
-            ps.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
-            ps.stack = ps.stack - action.amount;
-            ps.playerBetStreet = action.amount;
+            psNew.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
+            psNew.stack = ps.stack - action.amount;
+            psNew.playerBetStreet = action.amount;
         } else if (action.act == ActionType.BBPost) {
             // When a player posts the BB, it should affect:
             // -- HandState values:
@@ -530,15 +529,15 @@ contract SuavePokerTable is ISuavePokerTable {
             // uint8 whoseTurn;
             // uint stack;
             // uint playerBetStreet;
-            hs.handStage = HandStage.HolecardsDeal;
-            hs.lastAction = action;
-            hs.pot = hs.pot + action.amount;
-            hs.facingBet = action.amount;
-            hs.lastRaise = action.amount;
+            hsNew.handStage = HandStage.HolecardsDeal;
+            hsNew.lastAction = action;
+            hsNew.pot = hs.pot + action.amount;
+            hsNew.facingBet = action.amount;
+            hsNew.lastRaise = action.amount;
             // -- PlayerState values:
-            ps.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
-            ps.stack = ps.stack - action.amount;
-            ps.playerBetStreet = action.amount;
+            psNew.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
+            psNew.stack = ps.stack - action.amount;
+            psNew.playerBetStreet = action.amount;
         } else if (action.act == ActionType.Bet) {
             // When a player bets, it should affect:
             // -- HandState values:
@@ -552,15 +551,15 @@ contract SuavePokerTable is ISuavePokerTable {
             // uint playerBetStreet;
 
             // TODO - make this more general, currently hardcoded for 2 players
-            ps.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
+            psNew.whoseTurn = ps.whoseTurn == 0 ? 1 : 0;
             uint betAmountNew = action.amount - ps.playerBetStreet;
-            ps.stack = ps.stack - betAmountNew;
-            ps.playerBetStreet = action.amount;
+            psNew.stack = ps.stack - betAmountNew;
+            psNew.playerBetStreet = action.amount;
 
-            hs.lastAction = action;
-            hs.pot = hs.pot + betAmountNew;
-            hs.facingBet = action.amount;
-            hs.lastRaise = ps.playerBetStreet - hs.facingBet;
+            hsNew.lastAction = action;
+            hsNew.pot = hs.pot + betAmountNew;
+            hsNew.facingBet = action.amount;
+            hsNew.lastRaise = ps.playerBetStreet - hs.facingBet;
         } else if (action.act == ActionType.Fold) {
             // When a player folds, it should affect:
             // -- HandState values:
@@ -569,10 +568,10 @@ contract SuavePokerTable is ISuavePokerTable {
             // -- PlayerState values:
             // bool handOver;
             // bool inHand;
-            hs.handStage = HandStage.Showdown;
-            hs.lastAction = action;
-            ps.inHand = false;
-            hs.handOver = true;
+            hsNew.handStage = HandStage.Showdown;
+            hsNew.lastAction = action;
+            psNew.inHand = false;
+            hsNew.handOver = true;
         } else if (action.act == ActionType.Call) {
             // When a player calls, it should affect:
             // -- HandState values:
@@ -591,32 +590,35 @@ contract SuavePokerTable is ISuavePokerTable {
             // uint betAmountNew = hs.facingBet;
 
             // TODO - think this is wrong...
-            hs.pot = hs.pot + callAmountNew;
-            ps.stack = ps.stack - callAmountNew;
-            ps.playerBetStreet = ps.playerBetStreet + callAmountNew;
+            hsNew.pot = hs.pot + callAmountNew;
+            psNew.stack = ps.stack - callAmountNew;
 
             bool streetOver = ps.whoseTurn != hs.button;
             if (streetOver) {
                 if (hs.handStage == HandStage.PreflopBetting) {
-                    hs.handStage = HandStage.FlopDeal;
+                    hsNew.handStage = HandStage.FlopDeal;
                 } else if (hs.handStage == HandStage.FlopBetting) {
-                    hs.handStage = HandStage.TurnDeal;
+                    hsNew.handStage = HandStage.TurnDeal;
                 } else if (hs.handStage == HandStage.TurnBetting) {
-                    hs.handStage = HandStage.RiverDeal;
+                    hsNew.handStage = HandStage.RiverDeal;
                 } else if (hs.handStage == HandStage.RiverBetting) {
-                    hs.handStage = HandStage.Showdown;
+                    hsNew.handStage = HandStage.Showdown;
                 }
 
                 // Need to reset this for the next street!
                 Action memory lastAction = Action(0, ActionType.Null);
-                hs.lastAction = lastAction;
+                hsNew.lastAction = lastAction;
                 // TODO - this is hardcoded for two players, this should actually
                 // be the UTG player
-                ps.whoseTurn = hs.button;
+                psNew.whoseTurn = hs.button;
+                // So if ending street - reset player bets
+                psNew.playerBetStreet = 0;
+                psNew.oppBetStreet = 0;
             } else {
-                hs.lastAction = action;
+                hsNew.lastAction = action;
                 uint8 numPlayers = 2;
-                ps.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
+                psNew.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
+                psNew.playerBetStreet = ps.playerBetStreet + callAmountNew;
             }
         } else if (action.act == ActionType.Check) {
             // When a player checks, it should affect:
@@ -634,32 +636,37 @@ contract SuavePokerTable is ISuavePokerTable {
             if (streetOver) {
                 // Is there not any way to increment the enum by 1?
                 // hs.handStage = hs.handStage + 1;
-                if (hs.handStage == HandStage.PreflopBetting) {
-                    hs.handStage = HandStage.FlopDeal;
+                if (hsNew.handStage == HandStage.PreflopBetting) {
+                    hsNew.handStage = HandStage.FlopDeal;
                 } else if (hs.handStage == HandStage.FlopBetting) {
-                    hs.handStage = HandStage.TurnDeal;
+                    hsNew.handStage = HandStage.TurnDeal;
                 } else if (hs.handStage == HandStage.TurnBetting) {
-                    hs.handStage = HandStage.RiverDeal;
+                    hsNew.handStage = HandStage.RiverDeal;
                 } else if (hs.handStage == HandStage.RiverBetting) {
-                    hs.handStage = HandStage.Showdown;
+                    hsNew.handStage = HandStage.Showdown;
                 }
 
                 // Seems kind of pointless?  Why do we need handOver
                 // if we have 'Showdown' handStage?
-                if (hs.handStage == HandStage.Showdown) {
-                    hs.handOver = true;
+                if (hsNew.handStage == HandStage.Showdown) {
+                    hsNew.handOver = true;
                 }
                 // TODO - this is hardcoded for two players, this should actually
                 // be the UTG player
-                ps.whoseTurn = hs.button;
+                psNew.whoseTurn = hs.button;
+
+                // So if ending street - think these should both be 0 anyways?
+                // so no need to reset?
+                psNew.playerBetStreet = 0;
+                psNew.oppBetStreet = 0;
             } else {
                 uint8 numPlayers = 2;
-                ps.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
+                psNew.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
             }
-            hs.lastAction = action;
+            hsNew.lastAction = action;
         }
 
-        return (handStateNew, playerStateNew);
+        return (hsNew, psNew);
     }
 
     function _getNewCards(uint numCards) internal returns (uint8[] memory) {
@@ -696,9 +703,7 @@ contract SuavePokerTable is ISuavePokerTable {
 
         // If we've made it here the action is valid - transition to next gamestate
         // Now determine gamestate transition... what happens next?
-        console.log("Getting hand state...");
         HandState memory handStateCurr = _getHandState();
-        console.log("Getting player state...");
         PlayerState memory playerStateCurr = _getPlayerState();
 
         uint playerI = playerStateCurr.whoseTurn;
@@ -706,7 +711,6 @@ contract SuavePokerTable is ISuavePokerTable {
 
         HandState memory handStateNew;
         PlayerState memory playerStateNew;
-        console.log("Making state transition");
         (handStateNew, playerStateNew) = _transitionHandState(
             handStateCurr,
             playerStateCurr,

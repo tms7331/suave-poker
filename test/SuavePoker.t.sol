@@ -41,6 +41,50 @@ contract SuavePokerTableHarness is SuavePokerTable {
 }
 
 contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
+    function deploy() internal returns (SuavePokerTableHarness) {
+        // Deploys a contract and posts blinds for both players
+        uint smallBlind = 1;
+        uint bigBlind = 2;
+        uint minBuyin = 20;
+        uint maxBuyin = 200;
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(
+            smallBlind,
+            bigBlind,
+            minBuyin,
+            maxBuyin
+        );
+
+        // For initialization - we have to initialize both players and table
+        address(spt).call(spt.initPlayer(0));
+        address(spt).call(spt.initPlayer(1));
+        address(spt).call(spt.initTable());
+
+        uint seed = 123;
+        bytes memory input = abi.encode(seed);
+        ctx.setConfidentialInputs(input);
+
+        // Join as two different players
+        vm.prank(address(1));
+        address(spt).call(spt.joinTable(0, 100));
+
+        seed = 456;
+        input = abi.encode(seed);
+        ctx.setConfidentialInputs(input);
+
+        vm.prank(address(2));
+        address(spt).call(spt.joinTable(1, 100));
+
+        Action memory a0 = Action(1, ActionType.SBPost);
+        Action memory a1 = Action(2, ActionType.BBPost);
+
+        vm.prank(address(1));
+        address(spt).call(spt.takeAction(a0));
+
+        vm.prank(address(2));
+        address(spt).call(spt.takeAction(a1));
+        return spt;
+    }
+
     function test_joinTable() public {
         // 1/2 game with buyin of 20-200
 
@@ -106,44 +150,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         assertFalse(spt.initComplete());
         bool success = spt.exposed_validTurn(address(0));
         assertTrue(success);
-    }
-
-    function test_transitionHandState() public {
-        // 1/2 game with buyin of 20-200
-        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
-
-        ActionType actType = ActionType.Bet;
-        Action memory action = Action(100, actType);
-
-        HandStage handStage = HandStage.FlopBetting;
-        Action memory lastAction = Action(0, ActionType.Bet);
-
-        HandState memory handStateCurr = HandState({
-            handStage: handStage,
-            lastAction: lastAction,
-            pot: 2,
-            handOver: false,
-            facingBet: 0,
-            lastRaise: 0,
-            button: 0
-        });
-
-        PlayerState memory playerStateCurr = PlayerState({
-            whoseTurn: 0,
-            stack: 10,
-            inHand: true,
-            playerBetStreet: 20,
-            oppBetStreet: 20
-        });
-
-        HandState memory handStateNew;
-        PlayerState memory playerStateNew;
-
-        (handStateNew, playerStateNew) = spt.exposed_transitionHandState(
-            handStateCurr,
-            playerStateCurr,
-            action
-        );
     }
 
     function test_playFullHand() public {
@@ -252,7 +258,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
 
     function test_postBlinds() public {
         // Simulate all the actions to get to the point of posting blinds
-
         uint smallBlind = 1;
         uint bigBlind = 2;
         uint minBuyin = 20;
@@ -325,5 +330,137 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         // At this stage - handState should be PreflopBet
         hs = spt.exposed_getHandState();
         assertTrue(hs.handStage == HandStage.PreflopBetting);
+    }
+
+    function test_transitionHandState_Bet() public {
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
+        // Don't need to do any initialization as _transitionHandState is a pure function
+
+        HandState memory hs = HandState({
+            handStage: HandStage.PreflopBetting,
+            lastAction: Action(15, ActionType.Bet),
+            pot: 17,
+            handOver: false,
+            facingBet: 15,
+            lastRaise: 0,
+            button: 0
+        });
+        PlayerState memory ps = PlayerState({
+            whoseTurn: 1,
+            stack: 100,
+            inHand: true,
+            playerBetStreet: 2,
+            oppBetStreet: 15
+        });
+        Action memory action = Action(30, ActionType.Bet);
+
+        HandState memory hsNew;
+        PlayerState memory psNew;
+        (hsNew, psNew) = spt.exposed_transitionHandState(hs, ps, action);
+
+        // We bet 30, so result should be:
+        assertTrue(hsNew.handStage == HandStage.PreflopBetting);
+        assertTrue(hsNew.lastAction.act == ActionType.Bet);
+        assertTrue(hsNew.lastAction.amount == 30);
+        // ???
+        assertEq(hsNew.pot, 45);
+        assertTrue(hsNew.handOver == false);
+        assertEq(hsNew.facingBet, 30);
+        // assertEq(handStateNew.lastRaise, 15);
+        assertEq(hsNew.button, 0);
+
+        assertEq(psNew.whoseTurn, 0);
+        assertEq(psNew.stack, 72);
+        assertTrue(psNew.inHand == true);
+        assertEq(psNew.playerBetStreet, 30);
+        assertEq(psNew.oppBetStreet, 15);
+    }
+
+    function test_transitionHandState_Fold() public {
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
+
+        HandState memory hs = HandState({
+            handStage: HandStage.PreflopBetting,
+            lastAction: Action(0, ActionType.Null),
+            pot: 2,
+            handOver: false,
+            facingBet: 0,
+            lastRaise: 0,
+            button: 0
+        });
+        PlayerState memory ps = PlayerState({
+            whoseTurn: 0,
+            stack: 10,
+            inHand: true,
+            playerBetStreet: 0,
+            oppBetStreet: 0
+        });
+        Action memory action = Action(0, ActionType.Fold);
+
+        HandState memory handStateNew;
+        PlayerState memory playerStateNew;
+        (handStateNew, playerStateNew) = spt.exposed_transitionHandState(
+            hs,
+            ps,
+            action
+        );
+    }
+    function test_transitionHandState_Call() public {
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
+
+        HandState memory hs = HandState({
+            handStage: HandStage.PreflopBetting,
+            lastAction: Action(0, ActionType.Null),
+            pot: 2,
+            handOver: false,
+            facingBet: 0,
+            lastRaise: 0,
+            button: 0
+        });
+        PlayerState memory ps = PlayerState({
+            whoseTurn: 0,
+            stack: 10,
+            inHand: true,
+            playerBetStreet: 0,
+            oppBetStreet: 0
+        });
+        Action memory action = Action(1, ActionType.Call);
+
+        HandState memory handStateNew;
+        PlayerState memory playerStateNew;
+        (handStateNew, playerStateNew) = spt.exposed_transitionHandState(
+            hs,
+            ps,
+            action
+        );
+    }
+    function test_transitionHandState_Check() public {
+        SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
+
+        HandState memory hs = HandState({
+            handStage: HandStage.PreflopBetting,
+            lastAction: Action(0, ActionType.Null),
+            pot: 2,
+            handOver: false,
+            facingBet: 0,
+            lastRaise: 0,
+            button: 0
+        });
+        PlayerState memory ps = PlayerState({
+            whoseTurn: 0,
+            stack: 10,
+            inHand: true,
+            playerBetStreet: 0,
+            oppBetStreet: 0
+        });
+        Action memory action = Action(5, ActionType.Check);
+
+        HandState memory handStateNew;
+        PlayerState memory playerStateNew;
+        (handStateNew, playerStateNew) = spt.exposed_transitionHandState(
+            hs,
+            ps,
+            action
+        );
     }
 }
