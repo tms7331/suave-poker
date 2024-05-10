@@ -463,4 +463,35 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             action
         );
     }
+
+    function test_getNewCards() public pure {
+        // Hard to test function because pulling random numbers is integrated
+        // So just check core logic for confirming cards are valid
+
+        uint64 bitsOld = 2 ** 5;
+        uint64 randNum0 = 5;
+        uint64 randNum1 = 10;
+        uint64 randNum2 = 15;
+        uint64 bitsNew0 = uint64(2 ** (randNum0));
+        uint64 bitsNew1 = uint64(2 ** (randNum1));
+        uint64 bitsNew2 = uint64(2 ** (randNum2));
+
+        // Step 1 - make sure randNum0 fails, but randNum1 and randNum2 pass
+        uint64 bitsAnded0_A = bitsNew0 & bitsOld;
+        uint64 bitsAnded1_A = bitsNew1 & bitsOld;
+        uint64 bitsAnded2_A = bitsNew2 & bitsOld;
+        assertNotEq(bitsAnded0_A, 0);
+        assertEq(bitsAnded1_A, 0);
+        assertEq(bitsAnded2_A, 0);
+
+        // After updating 'bitsOld', only 2 should pass...
+        bitsOld = bitsNew1 | bitsOld;
+
+        uint64 bitsAnded0_B = bitsNew0 & bitsOld;
+        uint64 bitsAnded1_B = bitsNew1 & bitsOld;
+        uint64 bitsAnded2_B = bitsNew2 & bitsOld;
+        assertNotEq(bitsAnded0_B, 0);
+        assertNotEq(bitsAnded1_B, 0);
+        assertEq(bitsAnded2_B, 0);
+    }
 }

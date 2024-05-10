@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 import "suave-std/suavelib/Suave.sol";
-import "forge-std/console.sol";
+// import "forge-std/console.sol";
 import "suave-std/Context.sol";
 import {RNG} from "./RNG.sol";
 import {ISuavePokerTable} from "./interfaces/ISuavePoker.sol";
@@ -55,6 +55,8 @@ contract SuavePokerTable is ISuavePokerTable {
 
     event CardEvent(uint8 cardI);
 
+    event OffchainEvent(uint256 num);
+
     constructor(
         uint _smallBlind,
         uint _bigBlind,
@@ -85,7 +87,6 @@ contract SuavePokerTable is ISuavePokerTable {
         Suave.DataId _cardBitsId
     ) public payable {
         initComplete = true;
-        console.log("initTableCallback called...");
         rngRef = _rngRef;
         buttonId = _buttonId;
         handStageId = _handStageId;
@@ -117,8 +118,6 @@ contract SuavePokerTable is ISuavePokerTable {
         Suave.DataId _sittingOut,
         Suave.DataId _playerBetStreet
     ) public payable {
-        console.log("initPlayerCallback called...");
-
         if (playerI == 0) {
             playerAddrId0 = _playerAddr;
             stackId0 = _stack;
@@ -189,7 +188,6 @@ contract SuavePokerTable is ISuavePokerTable {
             "suavePoker:v0:dataId"
         );
         // TODO - are we using the actionList?  If yes, initialize!
-        console.log("WARNING - not initializing actionList!");
 
         Suave.DataRecord memory potRec = Suave.newDataRecord(
             0,
@@ -287,7 +285,6 @@ contract SuavePokerTable is ISuavePokerTable {
             "suavePoker:v0:dataId"
         );
         // TODO - if we're going to use this we need to set i...
-        console.log("WARNING - not initializing player cards!");
 
         // TODO - well need an array for this...
         Suave.DataRecord memory autoPostRec = Suave.newDataRecord(
@@ -328,9 +325,7 @@ contract SuavePokerTable is ISuavePokerTable {
             );
     }
 
-    function nullCallback() public payable {
-        console.log("nullCallback...");
-    }
+    function nullCallback() public payable {}
 
     function _depositOk(uint depositAmount) internal returns (bool) {
         return true;
@@ -670,24 +665,30 @@ contract SuavePokerTable is ISuavePokerTable {
     }
 
     function _getNewCards(uint numCards) internal returns (uint8[] memory) {
-        // Return cards between 1 and 52 -
-        // Avoid zero indexing because the Solidity default is 0 so it can cause
-        // issues with non-ambiguous representation
+        // Return a cards, 0 <= card <= 51
         uint8[] memory retCards = new uint8[](numCards);
-        uint64 oldBits = _getUint64(cardBitsId, "cardBits");
-        uint64 newBits = 0;
-        while (newBits == 0) {
-            uint randNum = RNG.generateRandomNumber(rngRef, 52) + 1;
-            uint64 bits = uint64(2 ** (randNum));
-            newBits = bits | oldBits;
+        uint64 bitsOld = _getUint64(cardBitsId, "cardBits");
+        for (uint i = 0; i < numCards; i++) {
+            // If bitsOld is 0010
+            // If our bitsNew is 0010, the bitsOld & bitsNew will be 0010, keep looping
+            // But if bitsNew is anything else, 'and' will be 0000, so we can break
+            uint64 bitsAnded = 1;
+            uint randNum;
+            uint64 bitsNew;
+            while (bitsAnded != 0) {
+                randNum = RNG.generateRandomNumber(rngRef, 52);
+                bitsNew = uint64(2 ** (randNum));
+                bitsAnded = bitsNew & bitsOld;
+            }
+            retCards[i] = uint8(randNum);
+            bitsOld = bitsNew | bitsOld;
         }
-        _setUint64(cardBitsId, "cardBits", newBits);
+        _setUint64(cardBitsId, "cardBits", bitsOld);
         return retCards;
     }
 
     function showCardsCallback(uint8[] memory retCards) public payable {
         for (uint256 i = 0; i < retCards.length; i++) {
-            // console.log(_fills[i].amount, _fills[i].price);
             emit CardEvent(retCards[i]);
         }
     }
@@ -695,7 +696,6 @@ contract SuavePokerTable is ISuavePokerTable {
     function takeAction(
         Action calldata action
     ) external returns (bytes memory) {
-        console.log("Taking action!");
         require(initComplete, "Table not initialized");
         // Ensure validitity of action
         require(_validAction(action), "Invalid action");
@@ -1041,5 +1041,21 @@ contract SuavePokerTable is ISuavePokerTable {
         _setUint(lastRaiseId, "lastRaise", hs.lastRaise);
         // We don't need to set this because it only changes between hands...
         _setUint8(buttonId, "button", hs.button);
+    }
+
+    function onchain() public {}
+
+    function apiRequest() public returns (bytes memory) {
+        Suave.HttpRequest memory request;
+        request.method = "POST";
+        request.url = "http://54.146.39.243:5000/postCard";
+        request.headers = new string[](1);
+        request.headers[0] = "Content-Type: application/json";
+        request.body = bytes(
+            '{"title": "My Card Title", "content": "Call from suave contract..."}'
+        );
+        bytes memory output = Suave.doHTTPRequest(request);
+
+        return abi.encodeWithSelector(this.onchain.selector);
     }
 }
