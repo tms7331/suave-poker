@@ -38,7 +38,12 @@ interface ISuavePokerTable {
         HandStage handStage;
         Action lastAction;
         uint pot;
-        bool handOver;
+        // If betting is complete one way or another (everyone folded or called)
+        bool bettingOver;
+        // If we need to call nextStreet
+        bool transitionNextStreet;
+        // Counter to determine multiway if action has closed on a given street
+        uint8 closingActionCount;
         // These will be more important for multiway
         uint facingBet;
         uint lastRaise;
@@ -51,6 +56,5 @@ interface ISuavePokerTable {
         uint stack;
         bool inHand;
         uint playerBetStreet;
-        uint oppBetStreet;
     }
 }

@@ -17,6 +17,13 @@ contract SuavePokerTable is ISuavePokerTable {
     // For the RNG
     Suave.DataId private rngRef;
 
+    // playerData will be an array of structs containing data that will not frequently change
+    // addr, autoPost, sittingOut
+    Suave.DataId[] private playerDataArr;
+    // playerState will be an array of structs containing state for current hand:
+    // stack, inHand, cards, playerBetStreet
+    Suave.DataId[] private playerStateArr;
+
     // Full PlayerState - put into some kind of array of structs?
     // P1
     Suave.DataId private playerAddrId0;
@@ -43,7 +50,9 @@ contract SuavePokerTable is ISuavePokerTable {
     Suave.DataId private handStageId; // HandStage enum
     Suave.DataId private lastActionId; // uint
     Suave.DataId private potId; // uint
-    Suave.DataId private handOverId; // bool
+    Suave.DataId private bettingOverId; // bool
+    Suave.DataId private transitionNextStreetId; // bool
+    Suave.DataId private closingActionCountId; // bool
     // these two should be reset every street
     Suave.DataId private facingBetId; // uint - biggest bet size (total bet amount) on a street
     Suave.DataId private lastRaiseId; // uint - last difference between bets
@@ -81,10 +90,9 @@ contract SuavePokerTable is ISuavePokerTable {
         Suave.DataId _whoseTurnId,
         Suave.DataId _actionListId,
         Suave.DataId _potId,
-        Suave.DataId _handOverId,
-        Suave.DataId _facingBetId,
-        Suave.DataId _lastRaiseId,
-        Suave.DataId _cardBitsId
+        Suave.DataId _bettingOverId,
+        Suave.DataId _transitionNextStreetId,
+        Suave.DataId _closingActionCountId
     ) public payable {
         initComplete = true;
         rngRef = _rngRef;
@@ -94,7 +102,19 @@ contract SuavePokerTable is ISuavePokerTable {
         whoseTurnId = _whoseTurnId;
         actionListId = _actionListId;
         potId = _potId;
-        handOverId = _handOverId;
+        bettingOverId = _bettingOverId;
+        transitionNextStreetId = _transitionNextStreetId;
+        closingActionCountId = _closingActionCountId;
+        // facingBetId = _facingBetId;
+        // lastRaiseId = _lastRaiseId;
+        // cardBitsId = _cardBitsId;
+    }
+
+    function initTableCallbackB(
+        Suave.DataId _facingBetId,
+        Suave.DataId _lastRaiseId,
+        Suave.DataId _cardBitsId
+    ) public payable {
         facingBetId = _facingBetId;
         lastRaiseId = _lastRaiseId;
         cardBitsId = _cardBitsId;
@@ -197,14 +217,51 @@ contract SuavePokerTable is ISuavePokerTable {
         );
         _setUint(potRec.id, "pot", 0);
 
-        Suave.DataRecord memory handOverRec = Suave.newDataRecord(
+        Suave.DataRecord memory bettingOverRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
-        _setBool(handOverRec.id, "handOver", false);
+        _setBool(bettingOverRec.id, "bettingOver", false);
 
+        Suave.DataRecord memory transitionNextStreetRec = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+        _setBool(transitionNextStreetRec.id, "transitionNextStreet", false);
+
+        Suave.DataRecord memory closingActionCountRec = Suave.newDataRecord(
+            0,
+            addressList,
+            addressList,
+            "suavePoker:v0:dataId"
+        );
+        _setUint8(closingActionCountRec.id, "closingActionCount", 0);
+
+        return
+            abi.encodeWithSelector(
+                this.initTableCallback.selector,
+                rngRec.id,
+                buttonIdRec.id,
+                handStageRec.id,
+                lastActionRec.id,
+                whoseTurnRec.id,
+                actionListRec.id,
+                potRec.id,
+                bettingOverRec.id,
+                transitionNextStreetRec.id,
+                closingActionCountRec.id
+                // facingBetRec.id,
+                // lastRaiseRec.id,
+                // cardBitsRec.id
+            );
+    }
+
+    function initTableB() external returns (bytes memory) {
+        // Hacky solution to stack to deep, refactor initTable once datatypes are finalized
         Suave.DataRecord memory facingBetRec = Suave.newDataRecord(
             0,
             addressList,
@@ -231,15 +288,7 @@ contract SuavePokerTable is ISuavePokerTable {
 
         return
             abi.encodeWithSelector(
-                this.initTableCallback.selector,
-                rngRec.id,
-                buttonIdRec.id,
-                handStageRec.id,
-                lastActionRec.id,
-                whoseTurnRec.id,
-                actionListRec.id,
-                potRec.id,
-                handOverRec.id,
+                this.initTableCallbackB.selector,
                 facingBetRec.id,
                 lastRaiseRec.id,
                 cardBitsRec.id
@@ -561,19 +610,19 @@ contract SuavePokerTable is ISuavePokerTable {
             // HandStage handStage;
             // Action lastAction;
             // -- PlayerState values:
-            // bool handOver;
+            // bool bettingOver;
             // bool inHand;
             hsNew.handStage = HandStage.Showdown;
             hsNew.lastAction = action;
             psNew.inHand = false;
-            hsNew.handOver = true;
+            hsNew.bettingOver = true;
         } else if (action.act == ActionType.Call) {
             // When a player calls, it should affect:
             // -- HandState values:
             // HandStage handStage - possibly;
             // Action lastAction
             // uint pot;
-            // bool handOver - if it was a call all-in...;
+            // bool bettingOver - if it was a call all-in...;
             // -- PlayerState values:
             // uint8 whoseTurn;
             // uint stack;
@@ -599,16 +648,8 @@ contract SuavePokerTable is ISuavePokerTable {
                 } else if (hs.handStage == HandStage.RiverBetting) {
                     hsNew.handStage = HandStage.Showdown;
                 }
-
-                // Need to reset this for the next street!
-                Action memory lastAction = Action(0, ActionType.Null);
-                hsNew.lastAction = lastAction;
-                // TODO - this is hardcoded for two players, this should actually
-                // be the UTG player
-                psNew.whoseTurn = hs.button;
-                // So if ending street - reset player bets
-                psNew.playerBetStreet = 0;
-                psNew.oppBetStreet = 0;
+                // TODO - have to return some flag or something here so we know
+                // to call _nextStreet
             } else {
                 hsNew.lastAction = action;
                 uint8 numPlayers = 2;
@@ -620,7 +661,7 @@ contract SuavePokerTable is ISuavePokerTable {
             // -- HandState values:
             // HandStage handStage - possibly!
             // Action lastAction;
-            // bool handOver - possibly!;
+            // bool bettingOver - possibly!;
             // -- PlayerState values:
             // uint8 whoseTurn;
 
@@ -641,19 +682,12 @@ contract SuavePokerTable is ISuavePokerTable {
                     hsNew.handStage = HandStage.Showdown;
                 }
 
-                // Seems kind of pointless?  Why do we need handOver
+                // Seems kind of pointless?  Why do we need bettingOver
                 // if we have 'Showdown' handStage?
                 if (hsNew.handStage == HandStage.Showdown) {
-                    hsNew.handOver = true;
+                    hsNew.bettingOver = true;
                 }
-                // TODO - this is hardcoded for two players, this should actually
-                // be the UTG player
-                psNew.whoseTurn = hs.button;
-
-                // So if ending street - think these should both be 0 anyways?
-                // so no need to reset?
-                psNew.playerBetStreet = 0;
-                psNew.oppBetStreet = 0;
+                // TODO - return some flag or something so we know to call _nextStreet
             } else {
                 uint8 numPlayers = 2;
                 psNew.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
@@ -757,8 +791,11 @@ contract SuavePokerTable is ISuavePokerTable {
         _updateHandState(handStateNew);
         _updatePlayerState(playerI, playerStateNew);
 
+        // What is logic to call this?
+        _nextStreet(handStateNew.button);
+
         // Check to see if hand is over after each action?
-        if (handStateNew.handOver) {
+        if (handStateNew.bettingOver) {
             // So if player folded - other player wins
             uint lookup0;
             uint lookup1;
@@ -802,6 +839,31 @@ contract SuavePokerTable is ISuavePokerTable {
         return 33;
     }
 
+    function _nextStreet(uint8 buttonCurr) internal {
+        // For next street we'll need to reset all player betStreet amounts
+        // as well as facingBet and lastRaise, and lastAction
+
+        // Need to reset this for the next street!
+        Action memory nullAction = Action(0, ActionType.Null);
+        _setLastAction(lastActionId, "lastAction", nullAction);
+
+        _setUint(facingBetId, "facingBet", 0);
+        _setUint(lastRaiseId, "lastRaise", 0);
+        _setUint64(playerBetStreetId0, "playerBetStreet", 0);
+        _setUint64(playerBetStreetId1, "playerBetStreet", 0);
+
+        // Set logic so when we extend to more players, logic will still work
+        uint8 numPlayers = 2;
+
+        // button should move around table
+        uint8 buttonNew = (buttonCurr + 1) % numPlayers;
+        // TODO - review this logic
+        // player to act should be UTG... button, SB, BB, UTG
+        // but if there are only 2 players, it's also SB?
+        uint8 utgNew = buttonNew; // (buttonNew + 2) % numPlayers;
+        _setUint8(whoseTurnId, "whoseTurn", utgNew);
+    }
+
     function _settle(uint pot, uint8 playerI) internal {
         // Credit pot to winner
         // Pass in values instead to avoid multiple calls?
@@ -833,7 +895,7 @@ contract SuavePokerTable is ISuavePokerTable {
         Action memory lastAction = Action(0, ActionType.Null);
         _setLastAction(lastActionId, "lastAction", lastAction);
         _setUint(potId, "pot", 0);
-        _setBool(handOverId, "handOver", false);
+        _setBool(bettingOverId, "bettingOver", false);
         _setUint(facingBetId, "facingBet", 0);
         _setUint(lastRaiseId, "lastRaise", 0);
         _setUint64(cardBitsId, "cardBits", 0);
@@ -961,25 +1023,21 @@ contract SuavePokerTable is ISuavePokerTable {
         uint stack;
         bool inHand;
         uint playerBetStreet;
-        uint oppBetStreet;
         if (whoseTurn == 0) {
             stack = _getUint(stackId0, "stack");
             inHand = _getBool(inHandId0, "inHand");
             playerBetStreet = _getUint(playerBetStreetId0, "playerBetStreet");
-            oppBetStreet = _getUint(playerBetStreetId1, "playerBetStreet");
         } else if (whoseTurn == 1) {
             stack = _getUint(stackId1, "stack");
             inHand = _getBool(inHandId1, "inHand");
             playerBetStreet = _getUint(playerBetStreetId1, "playerBetStreet");
-            oppBetStreet = _getUint(playerBetStreetId0, "playerBetStreet");
         }
 
         PlayerState memory playerState = PlayerState({
             whoseTurn: whoseTurn,
             stack: stack,
             inHand: inHand,
-            playerBetStreet: playerBetStreet,
-            oppBetStreet: oppBetStreet
+            playerBetStreet: playerBetStreet
         });
         return playerState;
     }
@@ -991,14 +1049,10 @@ contract SuavePokerTable is ISuavePokerTable {
             _setUint(stackId0, "stack", ps.stack);
             _setBool(inHandId0, "inHand", ps.inHand);
             _setUint(playerBetStreetId0, "playerBetStreet", ps.playerBetStreet);
-            // We also need to update oppBetStreet - because if it's a new street
-            // that will go to 0...
-            _setUint(playerBetStreetId1, "playerBetStreet", ps.oppBetStreet);
         } else if (playerI == 1) {
             _setUint(stackId1, "stack", ps.stack);
             _setBool(inHandId1, "inHand", ps.inHand);
             _setUint(playerBetStreetId1, "playerBetStreet", ps.playerBetStreet);
-            _setUint(playerBetStreetId0, "playerBetStreet", ps.oppBetStreet);
         }
     }
 
@@ -1006,19 +1060,29 @@ contract SuavePokerTable is ISuavePokerTable {
         HandStage handStage = _getHandStage(handStageId, "handStage");
         Action memory lastAction = _getLastAction(lastActionId, "lastAction");
         uint pot = _getUint(potId, "pot");
-        bool handOver = _getBool(handOverId, "handOver");
+        bool bettingOver = _getBool(bettingOverId, "bettingOver");
         // Action[] memory actionList = new Action[](1);
         // uint[] memory boardCards = new uint[](1);
         uint facingBet = _getUint(facingBetId, "facingBet");
         uint lastRaise = _getUint(lastRaiseId, "lastRaise");
         uint8 button = _getUint8(buttonId, "button");
+        uint8 closingActionCount = _getUint8(
+            closingActionCountId,
+            "closingActionCount"
+        );
+        bool transitionNextStreet = _getBool(
+            transitionNextStreetId,
+            "transitionNextStreet"
+        );
 
         // Return all the hand state variables
         HandState memory handState = HandState({
             handStage: handStage,
             lastAction: lastAction,
             pot: pot,
-            handOver: handOver,
+            bettingOver: bettingOver,
+            transitionNextStreet: transitionNextStreet,
+            closingActionCount: closingActionCount,
             facingBet: facingBet,
             lastRaise: lastRaise,
             button: button
@@ -1030,17 +1094,29 @@ contract SuavePokerTable is ISuavePokerTable {
         // HandStage handStage;
         // Action lastAction;
         // uint pot;
-        // bool handOver;
+        // bool bettingOver;
         // uint facingBet;
         // uint lastRaise;
         _setHandStage(handStageId, "handStage", hs.handStage);
         _setLastAction(lastActionId, "lastAction", hs.lastAction);
         _setUint(potId, "pot", hs.pot);
-        _setBool(handOverId, "handOver", hs.handOver);
+        _setBool(bettingOverId, "bettingOver", hs.bettingOver);
+
+        _setBool(
+            transitionNextStreetId,
+            "transitionNextStreet",
+            hs.transitionNextStreet
+        );
+        _setUint8(
+            closingActionCountId,
+            "closingActionCount",
+            hs.closingActionCount
+        );
+
         _setUint(facingBetId, "facingBet", hs.facingBet);
         _setUint(lastRaiseId, "lastRaise", hs.lastRaise);
         // We don't need to set this because it only changes between hands...
-        _setUint8(buttonId, "button", hs.button);
+        // _setUint8(buttonId, "button", hs.button);
     }
 
     function onchain() public {}
@@ -1055,6 +1131,8 @@ contract SuavePokerTable is ISuavePokerTable {
             '{"title": "My Card Title", "content": "Call from suave contract..."}'
         );
         bytes memory output = Suave.doHTTPRequest(request);
+
+        // string.concat(s1, s2)
 
         return abi.encodeWithSelector(this.onchain.selector);
     }

@@ -58,6 +58,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         address(spt).call(spt.initPlayer(0));
         address(spt).call(spt.initPlayer(1));
         address(spt).call(spt.initTable());
+        address(spt).call(spt.initTableB());
 
         uint seed = 123;
         bytes memory input = abi.encode(seed);
@@ -108,6 +109,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         address(spt).call(o1);
 
         bytes memory o2 = spt.initTable();
+        address(spt).call(spt.initTableB());
         address(spt).call(o2);
 
         assertTrue(spt.initComplete());
@@ -175,6 +177,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         address(spt).call(o1);
 
         bytes memory o2 = spt.initTable();
+        address(spt).call(spt.initTableB());
         address(spt).call(o2);
 
         assertTrue(spt.initComplete());
@@ -278,6 +281,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         address(spt).call(o1);
 
         bytes memory o2 = spt.initTable();
+        address(spt).call(spt.initTableB());
         address(spt).call(o2);
 
         console.log("Init ddone..");
@@ -340,7 +344,9 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             handStage: HandStage.PreflopBetting,
             lastAction: Action(15, ActionType.Bet),
             pot: 17,
-            handOver: false,
+            bettingOver: false,
+            transitionNextStreet: false,
+            closingActionCount: 1,
             facingBet: 15,
             lastRaise: 0,
             button: 0
@@ -349,8 +355,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             whoseTurn: 1,
             stack: 100,
             inHand: true,
-            playerBetStreet: 2,
-            oppBetStreet: 15
+            playerBetStreet: 2
         });
         Action memory action = Action(30, ActionType.Bet);
 
@@ -364,7 +369,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         assertTrue(hsNew.lastAction.amount == 30);
         // ???
         assertEq(hsNew.pot, 45);
-        assertTrue(hsNew.handOver == false);
+        assertTrue(hsNew.bettingOver == false);
         assertEq(hsNew.facingBet, 30);
         // assertEq(handStateNew.lastRaise, 15);
         assertEq(hsNew.button, 0);
@@ -373,7 +378,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         assertEq(psNew.stack, 72);
         assertTrue(psNew.inHand == true);
         assertEq(psNew.playerBetStreet, 30);
-        assertEq(psNew.oppBetStreet, 15);
     }
 
     function test_transitionHandState_Fold() public {
@@ -383,7 +387,9 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             handStage: HandStage.PreflopBetting,
             lastAction: Action(0, ActionType.Null),
             pot: 2,
-            handOver: false,
+            bettingOver: false,
+            transitionNextStreet: false,
+            closingActionCount: 1,
             facingBet: 0,
             lastRaise: 0,
             button: 0
@@ -392,8 +398,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             whoseTurn: 0,
             stack: 10,
             inHand: true,
-            playerBetStreet: 0,
-            oppBetStreet: 0
+            playerBetStreet: 0
         });
         Action memory action = Action(0, ActionType.Fold);
 
@@ -412,7 +417,9 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             handStage: HandStage.PreflopBetting,
             lastAction: Action(0, ActionType.Null),
             pot: 2,
-            handOver: false,
+            bettingOver: false,
+            transitionNextStreet: false,
+            closingActionCount: 1,
             facingBet: 0,
             lastRaise: 0,
             button: 0
@@ -421,8 +428,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             whoseTurn: 0,
             stack: 10,
             inHand: true,
-            playerBetStreet: 0,
-            oppBetStreet: 0
+            playerBetStreet: 0
         });
         Action memory action = Action(1, ActionType.Call);
 
@@ -441,7 +447,9 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             handStage: HandStage.PreflopBetting,
             lastAction: Action(0, ActionType.Null),
             pot: 2,
-            handOver: false,
+            bettingOver: false,
+            transitionNextStreet: false,
+            closingActionCount: 1,
             facingBet: 0,
             lastRaise: 0,
             button: 0
@@ -450,8 +458,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
             whoseTurn: 0,
             stack: 10,
             inHand: true,
-            playerBetStreet: 0,
-            oppBetStreet: 0
+            playerBetStreet: 0
         });
         Action memory action = Action(5, ActionType.Check);
 
