@@ -376,8 +376,13 @@ contract SuavePokerTable is ISuavePokerTable {
 
     function nullCallback() public payable {}
 
-    function _depositOk(uint depositAmount) internal returns (bool) {
-        return true;
+    function _depositOk(
+        uint stackCurr,
+        uint depositAmount
+    ) internal view returns (bool) {
+        // As long as deposit keeps player's stack in range [minBuyin, maxBuyin] it's ok
+        uint stackNew = stackCurr = depositAmount;
+        return stackNew >= minBuyin && stackNew <= maxBuyin;
     }
 
     function _getPlayer(uint8 seat) internal returns (address playerAddr) {
@@ -402,7 +407,7 @@ contract SuavePokerTable is ISuavePokerTable {
         // Make sure it's ok for them to join (seat available)
         require(_getPlayer(seat) == address(0));
         // Make sure their deposit amount is in bounds
-        require(_depositOk(depositAmount));
+        require(_depositOk(0, depositAmount));
 
         // They must also to pass in a random number to seed the RNG
         bytes memory noise = Context.confidentialInputs();
@@ -604,6 +609,13 @@ contract SuavePokerTable is ISuavePokerTable {
             hsNew.pot = hs.pot + betAmountNew;
             hsNew.facingBet = action.amount;
             hsNew.lastRaise = ps.playerBetStreet - hs.facingBet;
+
+            // Whenever there is a bet (or raise) this should OVERWRITE to 1!
+            // Examples:
+            // 2p -bet, call - closed
+            // 2p -bet, raise, call - closed
+            // 3p: bet, raise, raise, call, call - closed
+            hsNew.closingActionCount = 1;
         } else if (action.act == ActionType.Fold) {
             // When a player folds, it should affect:
             // -- HandState values:
@@ -616,6 +628,8 @@ contract SuavePokerTable is ISuavePokerTable {
             hsNew.lastAction = action;
             psNew.inHand = false;
             hsNew.bettingOver = true;
+
+            hsNew.closingActionCount = hsNew.closingActionCount + 1;
         } else if (action.act == ActionType.Call) {
             // When a player calls, it should affect:
             // -- HandState values:
@@ -637,25 +651,13 @@ contract SuavePokerTable is ISuavePokerTable {
             hsNew.pot = hs.pot + callAmountNew;
             psNew.stack = ps.stack - callAmountNew;
 
-            bool streetOver = ps.whoseTurn != hs.button;
-            if (streetOver) {
-                if (hs.handStage == HandStage.PreflopBetting) {
-                    hsNew.handStage = HandStage.FlopDeal;
-                } else if (hs.handStage == HandStage.FlopBetting) {
-                    hsNew.handStage = HandStage.TurnDeal;
-                } else if (hs.handStage == HandStage.TurnBetting) {
-                    hsNew.handStage = HandStage.RiverDeal;
-                } else if (hs.handStage == HandStage.RiverBetting) {
-                    hsNew.handStage = HandStage.Showdown;
-                }
-                // TODO - have to return some flag or something here so we know
-                // to call _nextStreet
-            } else {
-                hsNew.lastAction = action;
-                uint8 numPlayers = 2;
-                psNew.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
-                psNew.playerBetStreet = ps.playerBetStreet + callAmountNew;
-            }
+            // We mighto verwrite these values if street is over, that's ok
+            hsNew.lastAction = action;
+            // TODO - make it more flexible, hardcoded for two players
+            psNew.whoseTurn = (ps.whoseTurn + 1) % 2;
+            psNew.playerBetStreet = ps.playerBetStreet + callAmountNew;
+
+            hsNew.closingActionCount = hsNew.closingActionCount + 1;
         } else if (action.act == ActionType.Check) {
             // When a player checks, it should affect:
             // -- HandState values:
@@ -665,34 +667,33 @@ contract SuavePokerTable is ISuavePokerTable {
             // -- PlayerState values:
             // uint8 whoseTurn;
 
-            // If it's the last player to act (check based on button)
-            // and they check, onto next street...
-            bool streetOver = ps.whoseTurn != hs.button;
+            hsNew.closingActionCount = hsNew.closingActionCount + 1;
 
-            if (streetOver) {
-                // Is there not any way to increment the enum by 1?
-                // hs.handStage = hs.handStage + 1;
-                if (hsNew.handStage == HandStage.PreflopBetting) {
-                    hsNew.handStage = HandStage.FlopDeal;
-                } else if (hs.handStage == HandStage.FlopBetting) {
-                    hsNew.handStage = HandStage.TurnDeal;
-                } else if (hs.handStage == HandStage.TurnBetting) {
-                    hsNew.handStage = HandStage.RiverDeal;
-                } else if (hs.handStage == HandStage.RiverBetting) {
-                    hsNew.handStage = HandStage.Showdown;
-                }
-
-                // Seems kind of pointless?  Why do we need bettingOver
-                // if we have 'Showdown' handStage?
-                if (hsNew.handStage == HandStage.Showdown) {
-                    hsNew.bettingOver = true;
-                }
-                // TODO - return some flag or something so we know to call _nextStreet
-            } else {
-                uint8 numPlayers = 2;
-                psNew.whoseTurn = (ps.whoseTurn + 1) % numPlayers;
-            }
+            // Might overwrite this if it's not next street, that's ok
+            // TODO - hardcoded for 2 players...
+            psNew.whoseTurn = (ps.whoseTurn + 1) % 2;
             hsNew.lastAction = action;
+        }
+
+        // TODO - make it more flexible, hardcoded for 2 players
+        uint8 numPlayers = 2;
+        bool streetOver = hsNew.closingActionCount == numPlayers;
+        if (streetOver) {
+            if (hs.handStage == HandStage.PreflopBetting) {
+                hsNew.handStage = HandStage.FlopDeal;
+            } else if (hs.handStage == HandStage.FlopBetting) {
+                hsNew.handStage = HandStage.TurnDeal;
+            } else if (hs.handStage == HandStage.TurnBetting) {
+                hsNew.handStage = HandStage.RiverDeal;
+            } else if (hs.handStage == HandStage.RiverBetting) {
+                hsNew.handStage = HandStage.Showdown;
+            }
+            // will indicate we need to call _nextStreet
+            hsNew.transitionNextStreet = true;
+        }
+
+        if (hsNew.handStage == HandStage.Showdown) {
+            hsNew.bettingOver = true;
         }
 
         return (hsNew, psNew);
