@@ -19,8 +19,11 @@ contract SuavePokerTableHarness is SuavePokerTable {
         uint _maxBuyin
     ) SuavePokerTable(_smallBlind, _bigBlind, _minBuyin, _maxBuyin) {}
     // Deploy this contract then call this method to test `myInternalMethod`.
-    function exposed_validTurn(address sender) external pure returns (bool) {
-        return _validTurn(sender);
+    function exposed_validTurn(
+        address whoseTurnAddr,
+        address sender
+    ) external pure returns (bool) {
+        return _validTurn(whoseTurnAddr, sender);
     }
 
     function exposed_getPlayer(uint8 seat) external returns (address) {
@@ -31,11 +34,15 @@ contract SuavePokerTableHarness is SuavePokerTable {
         return _getHandState();
     }
 
+    function exposed_getPlayerState() external returns (PlayerState memory) {
+        return _getPlayerState();
+    }
+
     function exposed_transitionHandState(
         HandState memory handStateCurr,
         PlayerState memory playerStateCurr,
         Action memory action
-    ) external pure returns (HandState memory, PlayerState memory) {
+    ) external view returns (HandState memory, PlayerState memory) {
         return _transitionHandState(handStateCurr, playerStateCurr, action);
     }
 }
@@ -150,7 +157,7 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         // 1/2 game with buyin of 20-200
         SuavePokerTableHarness spt = new SuavePokerTableHarness(1, 2, 20, 200);
         assertFalse(spt.initComplete());
-        bool success = spt.exposed_validTurn(address(0));
+        bool success = spt.exposed_validTurn(address(1), address(1));
         assertTrue(success);
     }
 
@@ -230,6 +237,13 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         address(spt).call(cb);
 
         // Should be on flop at this point
+        HandState memory hs;
+        PlayerState memory ps;
+        hs = spt.exposed_getHandState();
+        assertTrue(hs.handStage == HandStage.FlopBetting);
+        ps = spt.exposed_getPlayerState();
+        assertEq(ps.whoseTurn, 0);
+
         vm.prank(address(1));
         cb = spt.takeAction(a2);
         address(spt).call(cb);
@@ -284,8 +298,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         address(spt).call(spt.initTableB());
         address(spt).call(o2);
 
-        console.log("Init ddone..");
-
         assertTrue(spt.initComplete());
         assertEq(spt.smallBlind(), smallBlind);
         assertEq(spt.bigBlind(), bigBlind);
@@ -299,7 +311,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         // Join as two different players
         vm.prank(address(1));
         bytes memory o3 = spt.joinTable(0, 100);
-        console.log("p1 joined");
         vm.expectEmit(true, true, true, true);
         emit PlayerJoined(address(1), 0, 100);
         address(spt).call(o3);
@@ -310,7 +321,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
 
         vm.prank(address(2));
         bytes memory o4 = spt.joinTable(1, 100);
-        console.log("p2 joined");
         vm.expectEmit(true, true, true, true);
         emit PlayerJoined(address(2), 1, 100);
         address(spt).call(o4);
@@ -319,8 +329,6 @@ contract TestSuavePoker is Test, SuaveEnabled, ISuavePokerTable {
         // blinds, raise/call, bet/call on each street
         Action memory a0 = Action(1, ActionType.SBPost);
         Action memory a1 = Action(2, ActionType.BBPost);
-
-        console.log("Now takinga ction...");
 
         vm.prank(address(1));
         address(spt).call(spt.takeAction(a0));

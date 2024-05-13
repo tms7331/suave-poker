@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 import "suave-std/suavelib/Suave.sol";
-// import "forge-std/console.sol";
+import "forge-std/console.sol";
 import "suave-std/Context.sol";
 import {RNG} from "./RNG.sol";
 import {ISuavePokerTable} from "./interfaces/ISuavePoker.sol";
@@ -51,7 +51,7 @@ contract SuavePokerTable is ISuavePokerTable {
     Suave.DataId private lastActionId; // uint
     Suave.DataId private potId; // uint
     Suave.DataId private bettingOverId; // bool
-    Suave.DataId private transitionNextStreetId; // bool
+    // Suave.DataId private transitionNextStreetId; // bool
     Suave.DataId private closingActionCountId; // bool
     // these two should be reset every street
     Suave.DataId private facingBetId; // uint - biggest bet size (total bet amount) on a street
@@ -91,7 +91,7 @@ contract SuavePokerTable is ISuavePokerTable {
         Suave.DataId _actionListId,
         Suave.DataId _potId,
         Suave.DataId _bettingOverId,
-        Suave.DataId _transitionNextStreetId,
+        // Suave.DataId _transitionNextStreetId,
         Suave.DataId _closingActionCountId
     ) public payable {
         initComplete = true;
@@ -103,7 +103,7 @@ contract SuavePokerTable is ISuavePokerTable {
         actionListId = _actionListId;
         potId = _potId;
         bettingOverId = _bettingOverId;
-        transitionNextStreetId = _transitionNextStreetId;
+        // transitionNextStreetId = _transitionNextStreetId;
         closingActionCountId = _closingActionCountId;
         // facingBetId = _facingBetId;
         // lastRaiseId = _lastRaiseId;
@@ -225,13 +225,14 @@ contract SuavePokerTable is ISuavePokerTable {
         );
         _setBool(bettingOverRec.id, "bettingOver", false);
 
-        Suave.DataRecord memory transitionNextStreetRec = Suave.newDataRecord(
-            0,
-            addressList,
-            addressList,
-            "suavePoker:v0:dataId"
-        );
-        _setBool(transitionNextStreetRec.id, "transitionNextStreet", false);
+        // Don't think we want to store this...
+        // Suave.DataRecord memory transitionNextStreetRec = Suave.newDataRecord(
+        //     0,
+        //     addressList,
+        //     addressList,
+        //     "suavePoker:v0:dataId"
+        // );
+        // _setBool(transitionNextStreetRec.id, "transitionNextStreet", false);
 
         Suave.DataRecord memory closingActionCountRec = Suave.newDataRecord(
             0,
@@ -252,7 +253,7 @@ contract SuavePokerTable is ISuavePokerTable {
                 actionListRec.id,
                 potRec.id,
                 bettingOverRec.id,
-                transitionNextStreetRec.id,
+                // transitionNextStreetRec.id,
                 closingActionCountRec.id
                 // facingBetRec.id,
                 // lastRaiseRec.id,
@@ -499,20 +500,41 @@ contract SuavePokerTable is ISuavePokerTable {
         return abi.encodeWithSelector(this.nullCallback.selector);
     }
 
-    function rebuy(uint depositAmount) external {
-        // TODO -
-        // Issue is we need to process rebuys in between hands
-        // This is NOT the same as an initial deposit...
+    function rebuy(uint8 seat, uint rebuyAmount) external {
+        // Do we need this?  getPlayer check should be sufficient
         require(initComplete, "Table not initialized");
+        // TODO -
+        // Add a check that only allows rebuys when player is not active in a hand
+        require(_getPlayer(seat) == msg.sender);
+
+        Suave.DataId stackId;
+        if (seat == 0) {
+            stackId = stackId0;
+        } else if (seat == 1) {
+            stackId = stackId1;
+        }
+
+        uint stackCurr = _getUint(stackId, "stack");
+        require(_depositOk(stackCurr, rebuyAmount));
+
         // Make sure it's ok for them to rebuy (player is in game)
         // Make sure their deposit amount is in bounds
         // For now - play money, just give them the deposit amount they want
-        // _deposit(depositAmount);
+        _deposit(rebuyAmount);
+
+        uint stackNew = stackCurr + rebuyAmount;
+        _setUint(stackId, "stack", stackNew);
     }
 
     function _deposit(uint depositAmount) internal {
-        address player = msg.sender;
-        // balances[player] += depositAMount;
+        // TODO - need to figure out mechanism for accessing mainnet funds
+        // and locking them up for a deposit here...
+        // address player = msg.sender;
+        // uint balTotal = rpcCall();
+        // uint balUsed = locked_bals[player];
+        // uint balFree = balTotal - balUsed;
+        // require(balFree >= depositAmount, "Insufficient funds")
+        // locked_bals[player] += depositAmount;
     }
 
     function _withdraw() internal {
@@ -530,16 +552,20 @@ contract SuavePokerTable is ISuavePokerTable {
         return true;
     }
 
-    function _validTurn(address sender) internal pure returns (bool) {
-        // Player should be in hand and it should be their turn
-        return true;
+    function _validTurn(
+        address whoseTurnAddr,
+        address sender
+    ) internal pure returns (bool) {
+        // Do we need a function for this?  Just inline it?
+        // Get address corresponding to 'whoseTurn' and compare to msg.sender
+        return (whoseTurnAddr == sender);
     }
 
     function _transitionHandState(
         HandState memory hs,
         PlayerState memory ps,
         Action memory action
-    ) internal pure returns (HandState memory, PlayerState memory) {
+    ) internal view returns (HandState memory, PlayerState memory) {
         // Is it safe to overwrite them as we go?
         PlayerState memory psNew = ps;
         HandState memory hsNew = hs;
@@ -741,8 +767,9 @@ contract SuavePokerTable is ISuavePokerTable {
         HandState memory handStateCurr = _getHandState();
         PlayerState memory playerStateCurr = _getPlayerState();
 
-        uint playerI = playerStateCurr.whoseTurn;
-        require(_validTurn(msg.sender), "Invalid Turn");
+        uint8 playerI = playerStateCurr.whoseTurn;
+        address whoseTurnAddr = _getPlayer(playerI);
+        require(_validTurn(whoseTurnAddr, msg.sender), "Invalid Turn");
 
         HandState memory handStateNew;
         PlayerState memory playerStateNew;
@@ -792,8 +819,11 @@ contract SuavePokerTable is ISuavePokerTable {
         _updateHandState(handStateNew);
         _updatePlayerState(playerI, playerStateNew);
 
-        // What is logic to call this?
-        _nextStreet(handStateNew.button);
+        // This has to be done after the other update since there can be overlap
+        // TODO - refactor to clean this up, dumb to be writing values multiple times
+        if (handStateNew.transitionNextStreet) {
+            _nextStreet(handStateNew.button);
+        }
 
         // Check to see if hand is over after each action?
         if (handStateNew.bettingOver) {
@@ -853,16 +883,10 @@ contract SuavePokerTable is ISuavePokerTable {
         _setUint64(playerBetStreetId0, "playerBetStreet", 0);
         _setUint64(playerBetStreetId1, "playerBetStreet", 0);
 
-        // Set logic so when we extend to more players, logic will still work
-        uint8 numPlayers = 2;
+        _setUint8(closingActionCountId, "closingActionCount", 0);
 
-        // button should move around table
-        uint8 buttonNew = (buttonCurr + 1) % numPlayers;
-        // TODO - review this logic
-        // player to act should be UTG... button, SB, BB, UTG
-        // but if there are only 2 players, it's also SB?
-        uint8 utgNew = buttonNew; // (buttonNew + 2) % numPlayers;
-        _setUint8(whoseTurnId, "whoseTurn", utgNew);
+        // For 2 players we just set it to the button
+        _setUint8(whoseTurnId, "whoseTurn", buttonCurr);
     }
 
     function _settle(uint pot, uint8 playerI) internal {
@@ -1071,10 +1095,10 @@ contract SuavePokerTable is ISuavePokerTable {
             closingActionCountId,
             "closingActionCount"
         );
-        bool transitionNextStreet = _getBool(
-            transitionNextStreetId,
-            "transitionNextStreet"
-        );
+        // bool transitionNextStreet = _getBool(
+        //     transitionNextStreetId,
+        //     "transitionNextStreet"
+        // );
 
         // Return all the hand state variables
         HandState memory handState = HandState({
@@ -1082,7 +1106,7 @@ contract SuavePokerTable is ISuavePokerTable {
             lastAction: lastAction,
             pot: pot,
             bettingOver: bettingOver,
-            transitionNextStreet: transitionNextStreet,
+            transitionNextStreet: false,
             closingActionCount: closingActionCount,
             facingBet: facingBet,
             lastRaise: lastRaise,
@@ -1103,11 +1127,11 @@ contract SuavePokerTable is ISuavePokerTable {
         _setUint(potId, "pot", hs.pot);
         _setBool(bettingOverId, "bettingOver", hs.bettingOver);
 
-        _setBool(
-            transitionNextStreetId,
-            "transitionNextStreet",
-            hs.transitionNextStreet
-        );
+        // _setBool(
+        //     transitionNextStreetId,
+        //     "transitionNextStreet",
+        //     hs.transitionNextStreet
+        // );
         _setUint8(
             closingActionCountId,
             "closingActionCount",
