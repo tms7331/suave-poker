@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
-// import "forge-std/console.sol";
+import "forge-std/console.sol";
 import "suave-std/suavelib/Suave.sol";
 import "suave-std/Context.sol";
 import {RNG} from "./RNG.sol";
-import {ISuavePokerTable} from "./interfaces/ISuavePoker.sol";
 import {ConfStoreHelper} from "./ConfStoreHelper.sol";
 
 contract SuavePokerTable is ConfStoreHelper {
-
     // Core table values...
     uint public smallBlind;
     uint public bigBlind;
@@ -18,10 +16,10 @@ contract SuavePokerTable is ConfStoreHelper {
     bool public initComplete;
     address[] addressList;
 
-    Suave.DataId[] private plrDataIdArr;
-    Suave.DataId private tblDataId;
+    Suave.DataId[] public plrDataIdArr;
+    Suave.DataId public tblDataId;
     // For the RNG
-    Suave.DataId private rngRefId;
+    Suave.DataId private rngDataId;
 
     struct PlayerState {
         address addr;
@@ -84,12 +82,16 @@ contract SuavePokerTable is ConfStoreHelper {
     }
 
     function initTableCallback(
-        Suave.DataId _rngRefId,
-        Suave.DataId _tblDataId
+        Suave.DataId _rngDataId,
+        Suave.DataId _tblDataId,
+        Suave.DataId[] calldata _plrDataIdArr
     ) public payable {
         initComplete = true;
-        rngRefId = _rngRefId;
+        rngDataId = _rngDataId;
         tblDataId = _tblDataId;
+        for (uint256 i = 0; i < _plrDataIdArr.length; i++) {
+            plrDataIdArr[i] = _plrDataIdArr[i];
+        }
     }
 
     function joinTableCallback(
@@ -107,7 +109,7 @@ contract SuavePokerTable is ConfStoreHelper {
     function nullCallback() public payable {}
 
     function initTable() external returns (bytes memory) {
-        Suave.DataRecord memory rngRef = Suave.newDataRecord(
+        Suave.DataRecord memory rngRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
@@ -115,44 +117,69 @@ contract SuavePokerTable is ConfStoreHelper {
         );
         // As part of initialization - initialize seed to some value
         bytes memory seed = abi.encode(123456);
-        RNG.storeSeed(rngRef.id, seed);
+        RNG.storeSeed(rngRec.id, seed);
 
-        Suave.DataRecord memory dataRec = Suave.newDataRecord(
+        Suave.DataRecord memory tblRec = Suave.newDataRecord(
             0,
             addressList,
             addressList,
             "suavePoker:v0:dataId"
         );
 
-        Suave.confidentialStore(dataRec.id, "tblHandStateId", abi.encode(0));
-        Suave.confidentialStore(dataRec.id, "tblButtonId", abi.encode(0));
-        Suave.confidentialStore(dataRec.id, "tblWhoseTurnId", abi.encode(0));
-        Suave.confidentialStore(dataRec.id, "tblFacingBetId", abi.encode(0));
-        Suave.confidentialStore(dataRec.id, "tblLastRaiseId", abi.encode(0));
-        Suave.confidentialStore(dataRec.id, "tblPotInitialId", abi.encode(0));
-        Suave.confidentialStore(
-            dataRec.id,
-            "tblClosingActionCountId",
-            abi.encode(0)
-        );
-        Suave.confidentialStore(
-            dataRec.id,
-            "tblLastActionTypeId",
-            abi.encode(0)
-        );
-        Suave.confidentialStore(dataRec.id, "tblLastAmountId", abi.encode(0));
-        Suave.confidentialStore(dataRec.id, "tblPotsCompleteId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblHandStateId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblButtonId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblWhoseTurnId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblFacingBetId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblLastRaiseId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblPotInitialId", abi.encode(0));
+        // Suave.confidentialStore(
+        //     tblRec.id,
+        //     "tblClosingActionCountId",
+        //     abi.encode(0)
+        // );
+        // Suave.confidentialStore(
+        //     tblRec.id,
+        //     "tblLastActionTypeId",
+        //     abi.encode(0)
+        // );
+        // Suave.confidentialStore(tblRec.id, "tblLastAmountId", abi.encode(0));
+        // Suave.confidentialStore(tblRec.id, "tblPotsCompleteId", abi.encode(0));
+
+        
+        // Set initial values for all table variables
+        _setTblHandStage(tblRec.id, HandStage.SBPostStage);
+        _setTblButton(tblRec.id, 0);
+        _setTblWhoseTurn(tblRec.id, 0);
+        _setTblFacingBet(tblRec.id, 0);
+        _setTblLastRaise(tblRec.id, 0);
+        _setTblPotInitial(tblRec.id, 0);
+        _setTblClosingActionCount(tblRec.id, 0);
+        _setTblLastActionType(tblRec.id, ActionType.Null);
+        _setTblLastAmount(tblRec.id, 0);
+        _setTblPotsComplete(tblRec.id, 0);
+        _setFlop(tblRec.id, 53, 53, 53);
+        _setTurn(tblRec.id, 53);
+        _setRiver(tblRec.id, 53);
+        _setCardBits(tblRec.id, 0);
+        _setHandId(tblRec.id, 0);
+
+        Suave.DataId[] memory plrDataIdArr = new Suave.DataId[](numSeats);
+        // Initialize all players too
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId = _initializeSeat();
+            plrDataIdArr[i] = plrDataId;
+        }
 
         return
             abi.encodeWithSelector(
                 this.initTableCallback.selector,
-                rngRef.id,
-                dataRec.id
+                rngRec.id,
+                tblRec.id,
+                plrDataIdArr
             );
     }
 
     function _initializeSeat() internal returns (Suave.DataId) {
-        // If seat is uninitialized - set all values to 0
         Suave.DataRecord memory seatRef = Suave.newDataRecord(
             0,
             addressList,
@@ -166,7 +193,7 @@ contract SuavePokerTable is ConfStoreHelper {
         _setPlrAddr(playerNewId, address(0));
         _setPlrStack(playerNewId, 0);
         _setPlrInHand(playerNewId, false);
-        _setPlrCards(playerNewId, 0);
+        _setPlrHolecards(playerNewId, 53, 53);
         _setPlrAutoPost(playerNewId, false);
         _setPlrSittingOut(playerNewId, true);
         _setPlrBetStreet(playerNewId, 0);
@@ -193,14 +220,9 @@ contract SuavePokerTable is ConfStoreHelper {
         bool autoPost
     ) external returns (bytes memory) {
         require(seatI >= 0 && seatI < numSeats, "Invalid seat!");
-
         require(initComplete, "Table not initialized");
         // If they havent jointed the table we need to initialize
         Suave.DataId plrDataId = plrDataIdArr[seatI];
-        // TODO - how can we make this conversion!?
-        // if (plrDataId_ == bytes(0)) {
-        //     plrDataId_ = _initializeSeat(seatI);
-        // }
 
         // Make sure it's ok for them to join (seat available)
         require(_getPlrAddr(plrDataId) == address(0));
@@ -216,11 +238,12 @@ contract SuavePokerTable is ConfStoreHelper {
 
         // They must also to pass in a random number to seed the RNG
         bytes memory noise = Context.confidentialInputs();
-        RNG.addNoise(rngRefId, noise);
+        RNG.addNoise(rngDataId, noise);
 
         _setPlrAddr(plrDataId, plrAddr);
+
         _setPlrStack(plrDataId, 0);
-        _setPlrCards(plrDataId, 0);
+        _setPlrHolecards(plrDataId, 53, 53);
         _setPlrAutoPost(plrDataId, autoPost);
         _setPlrSittingOut(plrDataId, true);
         _setPlrBetStreet(plrDataId, 0);
@@ -446,7 +469,7 @@ contract SuavePokerTable is ConfStoreHelper {
     function _getNewCards(uint numCards) internal returns (uint8[] memory) {
         // Return a cards, 0 <= card <= 51
         uint8[] memory retCards = new uint8[](numCards);
-        uint64 bitsOld = _getCardBits(rngRefId);
+        uint64 bitsOld = _getCardBits(rngDataId);
         for (uint i = 0; i < numCards; i++) {
             // If bitsOld is 0010
             // If our bitsNew is 0010, the bitsOld & bitsNew will be 0010, keep looping
@@ -455,14 +478,14 @@ contract SuavePokerTable is ConfStoreHelper {
             uint randNum;
             uint64 bitsNew;
             while (bitsAnded != 0) {
-                randNum = RNG.generateRandomNumber(rngRefId, 52);
+                randNum = RNG.generateRandomNumber(rngDataId, 52);
                 bitsNew = uint64(2 ** (randNum));
                 bitsAnded = bitsNew & bitsOld;
             }
             retCards[i] = uint8(randNum);
             bitsOld = bitsNew | bitsOld;
         }
-        _setCardBits(rngRefId, bitsOld);
+        _setCardBits(rngDataId, bitsOld);
         return retCards;
     }
 
@@ -472,7 +495,7 @@ contract SuavePokerTable is ConfStoreHelper {
             Suave.DataId plrDataId = plrDataIdArr[seat_i];
             if (_getPlrInHand(plrDataId)) {
                  cards = _getNewCards(2);
-                _setPlrHolecards(tblDataId, uint8(seat_i), cards[0], cards[1]);
+                _setPlrHolecards(tblDataId, cards[0], cards[1]);
             }
         }
     }
@@ -871,7 +894,7 @@ contract SuavePokerTable is ConfStoreHelper {
             for (uint256 i = 0; i < numSeats; i++) {
                 Suave.DataId plrDataId = plrDataIdArr[i];
                 if (_getPlrInHand(plrDataId)) {
-                    (cards[5], cards[6]) = _getPlrHolecards(plrDataId, uint8(i));
+                    (cards[5], cards[6]) = _getPlrHolecards(plrDataId);
                     // TODO - make API call to get SD value?
                     //showdownVal = ???
                 }

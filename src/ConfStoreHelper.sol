@@ -86,16 +86,16 @@ contract ConfStoreHelper {
         return abi.decode(val, (bool));
     }
 
-    function _setPlrCards(Suave.DataId plrDataId, uint cards) internal {
-        Suave.confidentialStore(plrDataId, "plrCards", abi.encode(cards));
-    }
+    // function _setPlrCards(Suave.DataId plrDataId, uint cards) internal {
+    //     Suave.confidentialStore(plrDataId, "plrCards", abi.encode(cards));
+    // }
 
-    function _getPlrCards(
-        Suave.DataId plrDataId
-    ) internal returns (uint cards) {
-        bytes memory val = Suave.confidentialRetrieve(plrDataId, "plrCards");
-        return abi.decode(val, (uint));
-    }
+    // function _getPlrCards(
+    //     Suave.DataId plrDataId
+    // ) internal returns (uint cards) {
+    //     bytes memory val = Suave.confidentialRetrieve(plrDataId, "plrCards");
+    //     return abi.decode(val, (uint));
+    // }
 
     function _setPlrAutoPost(Suave.DataId plrDataId, bool autoPost) internal {
         Suave.confidentialStore(plrDataId, "plrAutoPost", abi.encode(autoPost));
@@ -216,7 +216,7 @@ contract ConfStoreHelper {
     ) internal {
         Suave.confidentialStore(
             tblDataId,
-            "tblHandState",
+            "tblHandStage",
             abi.encode(handStage)
         );
     }
@@ -384,14 +384,13 @@ contract ConfStoreHelper {
         return abi.decode(val, (uint));
     }
 
-    function _setPlrHolecards(Suave.DataId tblDataId, uint8 playerI, uint8 hc0, uint8 hc1) internal {
-        string memory key = string.concat("holecards", Strings.toString(playerI));
-        Suave.confidentialStore(tblDataId, key, abi.encode(hc0, hc1));
+    function _setPlrHolecards(Suave.DataId plrDataId, uint8 hc0, uint8 hc1) internal {
+        // Remember - tblDataId is unique to each player
+        Suave.confidentialStore(plrDataId, "plrHolecards", abi.encode(hc0, hc1));
     }
 
-    function _getPlrHolecards(Suave.DataId tblDataId, uint8 playerI) internal returns (uint8, uint8) {
-        string memory key = string.concat("holecards", Strings.toString(playerI));
-        bytes memory val = Suave.confidentialRetrieve(tblDataId, key);
+    function _getPlrHolecards(Suave.DataId plrDataId) internal returns (uint8, uint8) {
+        bytes memory val = Suave.confidentialRetrieve(plrDataId, "plrHolecards");
         return abi.decode(val, (uint8, uint8));
     }
 
