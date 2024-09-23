@@ -60,7 +60,6 @@ contract SuavePokerTable is ConfStoreHelper {
         uint256 lastRaise
     );
 
-
     constructor(
         uint _smallBlind,
         uint _bigBlind,
@@ -126,26 +125,6 @@ contract SuavePokerTable is ConfStoreHelper {
             "suavePoker:v0:dataId"
         );
 
-        // Suave.confidentialStore(tblRec.id, "tblHandStateId", abi.encode(0));
-        // Suave.confidentialStore(tblRec.id, "tblButtonId", abi.encode(0));
-        // Suave.confidentialStore(tblRec.id, "tblWhoseTurnId", abi.encode(0));
-        // Suave.confidentialStore(tblRec.id, "tblFacingBetId", abi.encode(0));
-        // Suave.confidentialStore(tblRec.id, "tblLastRaiseId", abi.encode(0));
-        // Suave.confidentialStore(tblRec.id, "tblPotInitialId", abi.encode(0));
-        // Suave.confidentialStore(
-        //     tblRec.id,
-        //     "tblClosingActionCountId",
-        //     abi.encode(0)
-        // );
-        // Suave.confidentialStore(
-        //     tblRec.id,
-        //     "tblLastActionTypeId",
-        //     abi.encode(0)
-        // );
-        // Suave.confidentialStore(tblRec.id, "tblLastAmountId", abi.encode(0));
-        // Suave.confidentialStore(tblRec.id, "tblPotsCompleteId", abi.encode(0));
-
-        
         // Set initial values for all table variables
         _setTblHandStage(tblRec.id, HandStage.SBPostStage);
         _setTblButton(tblRec.id, 0);
@@ -156,18 +135,19 @@ contract SuavePokerTable is ConfStoreHelper {
         _setTblClosingActionCount(tblRec.id, 0);
         _setTblLastActionType(tblRec.id, ActionType.Null);
         _setTblLastAmount(tblRec.id, 0);
-        _setTblPotsComplete(tblRec.id, 0);
-        _setFlop(tblRec.id, 53, 53, 53);
-        _setTurn(tblRec.id, 53);
-        _setRiver(tblRec.id, 53);
-        _setCardBits(tblRec.id, 0);
+        Pot memory pot = Pot({players: new bool[](numSeats), amount: 0});
+        _setTblPotsComplete(tblRec.id, pot);
+        _setTblFlop(tblRec.id, 53, 53, 53);
+        _setTblTurn(tblRec.id, 53);
+        _setTblRiver(tblRec.id, 53);
+        _setCardBits(rngRec.id, 0);
         _setHandId(tblRec.id, 0);
 
-        Suave.DataId[] memory plrDataIdArr = new Suave.DataId[](numSeats);
+        Suave.DataId[] memory _plrDataIdArr = new Suave.DataId[](numSeats);
         // Initialize all players too
         for (uint256 i = 0; i < numSeats; i++) {
             Suave.DataId plrDataId = _initializeSeat();
-            plrDataIdArr[i] = plrDataId;
+            _plrDataIdArr[i] = plrDataId;
         }
 
         return
@@ -175,7 +155,7 @@ contract SuavePokerTable is ConfStoreHelper {
                 this.initTableCallback.selector,
                 rngRec.id,
                 tblRec.id,
-                plrDataIdArr
+                _plrDataIdArr
             );
     }
 
@@ -226,7 +206,15 @@ contract SuavePokerTable is ConfStoreHelper {
 
         // Make sure it's ok for them to join (seat available)
         require(_getPlrAddr(plrDataId) == address(0));
-        // TODO - we need to prevent player from joining multiple times...
+        // Prevent player from joining multiple times - more efficient way to do this?
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId = plrDataIdArr[i];
+            require(
+                _getPlrAddr(plrDataId) != plrAddr,
+                "Player already joined!"
+            );
+        }
+
         // require(playerToSeat[addr] == 0, "Player already joined!");
         require(
             depositAmount >= minBuyin && depositAmount <= maxBuyin,
@@ -242,7 +230,7 @@ contract SuavePokerTable is ConfStoreHelper {
 
         _setPlrAddr(plrDataId, plrAddr);
 
-        _setPlrStack(plrDataId, 0);
+        _setPlrStack(plrDataId, depositAmount);
         _setPlrHolecards(plrDataId, 53, 53);
         _setPlrAutoPost(plrDataId, autoPost);
         _setPlrSittingOut(plrDataId, true);
@@ -315,11 +303,12 @@ contract SuavePokerTable is ConfStoreHelper {
 
     function takeAction(
         ActionType actionType,
-        address player,
         uint seatI,
         uint256 amount,
         bool externalAction
     ) external {
+        address player = msg.sender;
+
         Suave.DataId plrDataId = plrDataIdArr[seatI];
 
         // Group player-related variables into a struct
@@ -359,16 +348,17 @@ contract SuavePokerTable is ConfStoreHelper {
         // Transition the hand state
         HandState memory hsNew = _transitionHandState(hs, actionType, amount);
 
-        // Update player data
         _setPlrStack(plrDataId, hsNew.playerStack);
         _setPlrBetStreet(plrDataId, hsNew.playerBetStreet);
         _setPlrLastAmount(plrDataId, amount);
         _setPlrLastActionType(plrDataId, actionType);
-
         if (actionType == ActionType.Fold) {
             _setPlrInHand(plrDataId, false);
         }
 
+        _setTblFacingBet(tblDataId, hsNew.facingBet);
+
+        // Should either be reset or incremented
         if (
             actionType == ActionType.SBPost || actionType == ActionType.BBPost
         ) {
@@ -376,23 +366,30 @@ contract SuavePokerTable is ConfStoreHelper {
         } else if (actionType == ActionType.Bet) {
             _setTblClosingActionCount(tblDataId, 0);
         }
+        // else {
+        //     _setTblClosingActionCount(
+        //         tblDataId,
+        //         _getTblClosingActionCount(tblDataId) + 1
+        //     );
+        // }
 
         _incrementWhoseTurn();
 
-        // Transition hand stage if necessary
-        if (externalAction) {
-            _transitionHandStage(
-                actionType == ActionType.SBPost ||
-                    actionType == ActionType.BBPost
-            );
-        }
+        // TODOTODO - review all these values... think action should not be fold?
+        _setTblLastRaise(tblDataId, hsNew.lastRaise);
+        _setTblLastActionType(tblDataId, hsNew.lastActionType);
+        _setTblLastAmount(tblDataId, hsNew.lastActionAmount);
+
+        _transitionHandStage(
+            actionType == ActionType.SBPost || actionType == ActionType.BBPost
+        );
     }
 
     function _transitionHandState(
         HandState memory handState,
         ActionType actionType,
         uint amount
-    ) internal pure returns (HandState memory) {
+    ) internal view returns (HandState memory) {
         HandState memory newHandState = handState;
 
         if (actionType == ActionType.SBPost) {
@@ -418,6 +415,7 @@ contract SuavePokerTable is ConfStoreHelper {
         } else if (actionType == ActionType.Fold) {
             newHandState.lastActionAmount = 0;
         } else if (actionType == ActionType.Call) {
+            console.log(handState.facingBet);
             uint newCallAmount = handState.facingBet -
                 handState.playerBetStreet;
             if (newCallAmount > handState.playerStack) {
@@ -448,7 +446,6 @@ contract SuavePokerTable is ConfStoreHelper {
                 count++;
             }
         }
-
         return count <= 1 && _getTblClosingActionCount(tblDataId) == 0;
     }
 
@@ -494,7 +491,7 @@ contract SuavePokerTable is ConfStoreHelper {
         for (uint256 seat_i = 0; seat_i < numSeats; seat_i++) {
             Suave.DataId plrDataId = plrDataIdArr[seat_i];
             if (_getPlrInHand(plrDataId)) {
-                 cards = _getNewCards(2);
+                cards = _getNewCards(2);
                 _setPlrHolecards(tblDataId, cards[0], cards[1]);
             }
         }
@@ -503,46 +500,53 @@ contract SuavePokerTable is ConfStoreHelper {
     function _dealFlop() internal {
         if (!allFolded()) {
             uint8[] memory cards = _getNewCards(3);
-            _setFlop(tblDataId, cards[0], cards[1], cards[2]);
+            _setTblFlop(tblDataId, cards[0], cards[1], cards[2]);
         }
     }
 
     function _dealTurn() internal {
         if (!allFolded()) {
             uint8[] memory cards = _getNewCards(1);
-            _setTurn(tblDataId, cards[0]);
+            _setTblTurn(tblDataId, cards[0]);
         }
     }
 
     function _dealRiver() internal {
         if (!allFolded()) {
             uint8[] memory cards = _getNewCards(1);
-            _setRiver(tblDataId, cards[0]);
+            _setTblRiver(tblDataId, cards[0]);
         }
     }
 
     function _handStageOverCheck() internal returns (bool) {
-        uint closingActionCount = _getTblClosingActionCount(tblDataId);
-        return closingActionCount >= numSeats;
+        int closingActionCount = _getTblClosingActionCount(tblDataId);
+        return (closingActionCount > 0) && uint(closingActionCount) >= numSeats;
     }
 
     function _transitionHandStage(bool posted) internal {
-        // TODO - need to emit events for updates
-
         HandStage handStage = _getTblHandStage(tblDataId);
 
+        // Blinds
+        if (handStage == HandStage.SBPostStage) {
+            _setTblHandStage(tblDataId, HandStage.BBPostStage);
+            return;
+        } else if (handStage == HandStage.BBPostStage) {
+            _setTblHandStage(tblDataId, HandStage.HolecardsDeal);
+            _transitionHandStage(false);
+            return;
+        }
         // Deal Holecards
-        if (handStage == HandStage.HolecardsDeal) {
+        else if (handStage == HandStage.HolecardsDeal) {
             _dealHolecards();
-            handStage = HandStage.PreflopBetting;
+            _setTblHandStage(tblDataId, HandStage.PreflopBetting);
             _transitionHandStage(false);
             return;
         }
         // Preflop Betting
         else if (handStage == HandStage.PreflopBetting) {
             if (_handStageOverCheck() || allFolded() || allIn()) {
-                handStage = HandStage.FlopDeal;
                 _nextStreet();
+                _setTblHandStage(tblDataId, HandStage.FlopDeal);
                 _transitionHandStage(false);
             }
             return;
@@ -550,15 +554,14 @@ contract SuavePokerTable is ConfStoreHelper {
         // Deal Flop
         else if (handStage == HandStage.FlopDeal) {
             _dealFlop();
-            handStage = HandStage.FlopBetting;
-            _transitionHandStage(false);
+            _setTblHandStage(tblDataId, HandStage.FlopBetting);
             return;
         }
         // Flop Betting
         else if (handStage == HandStage.FlopBetting) {
             if (_handStageOverCheck() || allFolded() || allIn()) {
-                handStage = HandStage.TurnDeal;
                 _nextStreet();
+                _setTblHandStage(tblDataId, HandStage.TurnDeal);
                 _transitionHandStage(false);
             }
             return;
@@ -566,15 +569,14 @@ contract SuavePokerTable is ConfStoreHelper {
         // Deal Turn
         else if (handStage == HandStage.TurnDeal) {
             _dealTurn();
-            handStage = HandStage.TurnBetting;
-            _transitionHandStage(false);
+            _setTblHandStage(tblDataId, HandStage.TurnBetting);
             return;
         }
         // Turn Betting
         else if (handStage == HandStage.TurnBetting) {
             if (_handStageOverCheck() || allFolded() || allIn()) {
-                handStage = HandStage.RiverDeal;
                 _nextStreet();
+                _setTblHandStage(tblDataId, HandStage.RiverDeal);
                 _transitionHandStage(false);
             }
             return;
@@ -582,15 +584,13 @@ contract SuavePokerTable is ConfStoreHelper {
         // Deal River
         else if (handStage == HandStage.RiverDeal) {
             _dealRiver();
-            handStage = HandStage.RiverBetting;
-            _transitionHandStage(false);
+            _setTblHandStage(tblDataId, HandStage.RiverBetting);
             return;
         }
         // River Betting
         else if (handStage == HandStage.RiverBetting) {
             if (_handStageOverCheck() || allFolded() || allIn()) {
-                handStage = HandStage.Showdown;
-                _nextStreet();
+                _setTblHandStage(tblDataId, HandStage.Showdown);
                 _calculateFinalPot();
                 _transitionHandStage(false);
             }
@@ -599,18 +599,16 @@ contract SuavePokerTable is ConfStoreHelper {
         // Showdown
         else if (handStage == HandStage.Showdown) {
             _showdown();
-            handStage = HandStage.Settle;
+            _setTblHandStage(tblDataId, HandStage.Settle);
             _transitionHandStage(false);
             return;
         }
         // Settle Stage
         else if (handStage == HandStage.Settle) {
-            // TODO - how are we settling?
-            // _settle();
+            _settle();
             _nextHand();
             // Reset to post blinds stage
-            handStage = HandStage.SBPostStage;
-            _transitionHandStage(false);
+            _setTblHandStage(tblDataId, HandStage.SBPostStage);
             return;
         }
     }
@@ -649,7 +647,7 @@ contract SuavePokerTable is ConfStoreHelper {
     function _incrementWhoseTurn() internal {
         bool incremented = false;
         uint8 whoseTurn = _getTblWhoseTurn(tblDataId);
-        uint closingActionCount = _getTblClosingActionCount(tblDataId);
+        int closingActionCount = _getTblClosingActionCount(tblDataId);
 
         for (uint256 i = 1; i <= numSeats; i++) {
             // Want to go around the table in order, starting from
@@ -670,6 +668,7 @@ contract SuavePokerTable is ConfStoreHelper {
             }
         }
 
+        _setTblClosingActionCount(tblDataId, closingActionCount);
         // Optionally assert checks for debugging
         // require(closingActionCount <= (numSeats + 1), "Too high closingActionCount!");
         // require(incremented, "Failed to increment whoseTurn!");
@@ -680,17 +679,28 @@ contract SuavePokerTable is ConfStoreHelper {
         _setTblClosingActionCount(tblDataId, 0);
         _setTblFacingBet(tblDataId, 0);
         _setTblLastRaise(tblDataId, 0);
-        _setTblLastActionType(tblDataId, ActionType.Check);
+        _setTblLastActionType(tblDataId, ActionType.Null);
         _setTblLastAmount(tblDataId, 0);
+        _setCardBits(rngDataId, 0);
+
+        _setTblFlop(tblDataId, 53, 53, 53);
+        _setTblTurn(tblDataId, 53);
+        _setTblRiver(tblDataId, 53);
+
+        // TODOTODO - how do we set this?
+        // _setTblPotsComplete(tblDataId, 0);
 
         // Reset players
         for (uint i = 0; i < numSeats; i++) {
             Suave.DataId plrDataId = plrDataIdArr[i];
             if (_getPlrAddr(plrDataId) != address(0)) {
+                _setPlrHolecards(plrDataId, 53, 53);
+                _setPlrInHand(plrDataId, true);
+                _setPlrLastActionType(plrDataId, ActionType.Null);
+                _setPlrLastAmount(plrDataId, 0);
+
                 _setPlrBetStreet(plrDataId, 0);
                 _setPlrShowdownVal(plrDataId, 8000);
-                // TODO - handle holecards...
-                // delete seats[seat_i].holecards;
 
                 // Handle bust and sitting out conditions
                 if (_getPlrStack(plrDataId) <= smallBlind) {
@@ -711,12 +721,14 @@ contract SuavePokerTable is ConfStoreHelper {
         // whoseTurn = button;
         uint8 button = _getTblButton(tblDataId);
         _setTblWhoseTurn(tblDataId, button);
-        _incrementHandHistory();
+        _incrementHandId();
     }
 
     function _calculateFinalPot() internal {
         bool[] memory streetPlayers = new bool[](numSeats);
         uint256 playerCount = 0;
+
+        // uint8[] memory activePlayers = new bool[](numSeats);
 
         // Identify players still in hand and with positive stack
         for (uint256 i = 0; i < numSeats; i++) {
@@ -725,6 +737,17 @@ contract SuavePokerTable is ConfStoreHelper {
                 streetPlayers[i] = true;
             }
         }
+
+        uint potAmount = _getTblPotInitial(tblDataId);
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId = plrDataIdArr[i];
+            potAmount += _getPlrBetStreet(plrDataId);
+        }
+
+        Pot memory mainPot;
+        mainPot.players = streetPlayers;
+        mainPot.amount = potAmount;
+        _setTblPotsComplete(tblDataId, mainPot);
 
         // TODO - we need to calculate this...
         // Calculate the main pot amount
@@ -735,7 +758,7 @@ contract SuavePokerTable is ConfStoreHelper {
 
         // Create the main pot and push to potsComplete
         // main_pot = {"players": street_players, "amount": main_pot_amount}
-        Pot memory mainPot;
+        //Pot memory mainPot;
         // TODO - fix here too...
         // mainPot.amount = mainPotAmount;
         // mainPot.players = new uint256[](playerCount);
@@ -747,7 +770,38 @@ contract SuavePokerTable is ConfStoreHelper {
     }
 
     function _nextStreet() internal {
+        // TODOTODO - set these, figure out how we're tracking them...
+        // tblPotInitial(Suave.DataId tblDataId,uint potInitial)
+        // tblPotsComplete(Suave.DataId tblDataId,uint potsComplete)
+
+        // Set the turn to the next player
+        uint8 button = _getTblButton(tblDataId);
+        // TODO - can we improve this logic?
+        if (button == 0) {
+            button = uint8(numSeats);
+        } else {
+            button = uint8((button - 1) % numSeats);
+        }
+        _setTblWhoseTurn(tblDataId, button);
+        _incrementWhoseTurn();
+
+        // Reset table betting state
+        _setTblFacingBet(tblDataId, 0);
+        _setTblLastRaise(tblDataId, 0);
+        _setTblLastActionType(tblDataId, ActionType.Null);
+        _setTblLastAmount(tblDataId, 0);
+        _setTblClosingActionCount(tblDataId, 0);
+
         uint256 potInitialNew = _getTblPotInitial(tblDataId);
+        // Reset player betting state
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId = plrDataIdArr[i];
+            potInitialNew += _getPlrBetStreet(plrDataId);
+            _setPlrBetStreet(plrDataId, 0);
+            _setPlrLastActionType(plrDataId, ActionType.Null);
+            _setPlrLastAmount(plrDataId, 0);
+        }
+        /*
 
         // Calculate remaining pot after previous side pots
         uint256 potInitialLeft = potInitialNew;
@@ -766,16 +820,6 @@ contract SuavePokerTable is ConfStoreHelper {
             }
         }
 
-        // Set the turn to the next player
-        // whoseTurn = (button - 1) % numSeats;
-        _incrementWhoseTurn();
-
-        // Reset relevant betting state
-        _setTblFacingBet(tblDataId, 0);
-        _setTblLastRaise(tblDataId, 0);
-        _setTblLastActionType(tblDataId, ActionType.Null);
-        _setTblLastAmount(tblDataId, 0);
-        _setTblClosingActionCount(tblDataId, 0);
 
         // Determine street players and handle all-ins
         uint256[] memory streetPlayers = new uint256[](numSeats);
@@ -844,14 +888,78 @@ contract SuavePokerTable is ConfStoreHelper {
                 }
             }
         }
+        */
 
-        // Update pot initial for next round
         _setTblPotInitial(tblDataId, potInitialNew);
     }
 
-    function _incrementHandHistory() internal {
+    function _incrementHandId() internal {
         uint handId = _getHandId(tblDataId);
         _setHandId(tblDataId, handId + 1);
+    }
+
+    function _settle() internal {
+        uint256[] memory lookupVals = new uint256[](numSeats);
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId = plrDataIdArr[i];
+            uint showdownVal = _getPlrShowdownVal(plrDataId);
+            lookupVals[i] = showdownVal;
+        }
+
+        Pot memory pot = _getTblPotsComplete(tblDataId);
+        uint256 winnerVal = 9000;
+
+        bool[] memory isWinner = new bool[](numSeats);
+
+        uint256 winnerCount = 0;
+        for (uint256 i = 0; i < numSeats; i++) {
+            if (pot.players[i] && lookupVals[i] <= winnerVal) {
+                if (lookupVals[i] < winnerVal) {
+                    // Ugly but we have to clear out previous winners
+                    for (uint256 j = 0; j < numSeats; j++) {
+                        isWinner[j] = false;
+                    }
+                    winnerVal = lookupVals[i];
+                    isWinner[i] = true;
+                    winnerCount = 1;
+                } else {
+                    isWinner[i] = true;
+                    winnerCount++;
+                }
+            }
+        }
+
+        // Credit winnings
+        for (uint256 i = 0; i < numSeats; i++) {
+            if (isWinner[i]) {
+                _setPlrStack(
+                    plrDataIdArr[i],
+                    _getPlrStack(plrDataIdArr[i]) + pot.amount / winnerCount
+                );
+            }
+        }
+
+        /*
+        for pot in self.pots_complete:
+            winner_val = 9000
+            winner_i = []
+            # Will consist of 'amount' and 'players'
+            for seat_i in pot["players"]:
+                if self.seats[seat_i]["showdown_val"] < winner_val:
+                    winner_val = self.seats[seat_i]["showdown_val"]
+                    winner_i = [seat_i]
+                elif self.seats[seat_i]["showdown_val"] == winner_val:
+                    winner_i.append(seat_i)
+            # Credit winnings
+            for seat_i in winner_i:
+                self.seats[seat_i]["stack"] += pot["amount"] / len(winner_i)
+            # And add our event
+            # [{ potTotal: 60, winners: { 0: 60 } }];
+            # pot_dict = {seat_i: pot["amount"] / len(winner_i) for seat_i in winner_i}
+            winner_dict = {seat_i: pot["amount"] / len(winner_i) for seat_i in winner_i}
+            pot_dict = {"potTotal": pot["amount"], "winners": winner_dict}
+            action["pots"].append(pot_dict)
+            */
     }
 
     function _getShowdownVal(
@@ -861,7 +969,6 @@ contract SuavePokerTable is ConfStoreHelper {
 
         // TODO - make API call here to start...
         uint lookupVal = 33;
-
         return lookupVal;
     }
 
@@ -886,17 +993,16 @@ contract SuavePokerTable is ConfStoreHelper {
             // Best possible SD value
             _setPlrShowdownVal(plrDataId, 0);
         } else {
-
             uint8[] memory cards = new uint8[](7);
-            (cards[0], cards[1], cards[2]) = _getFlop(tblDataId);
-            cards[3] = _getTurn(tblDataId);
-            cards[4] = _getRiver(tblDataId);
+            (cards[0], cards[1], cards[2]) = _getTblFlop(tblDataId);
+            cards[3] = _getTblTurn(tblDataId);
+            cards[4] = _getTblRiver(tblDataId);
             for (uint256 i = 0; i < numSeats; i++) {
                 Suave.DataId plrDataId = plrDataIdArr[i];
                 if (_getPlrInHand(plrDataId)) {
                     (cards[5], cards[6]) = _getPlrHolecards(plrDataId);
-                    // TODO - make API call to get SD value?
-                    //showdownVal = ???
+                    uint showdownVal = _getShowdownVal(cards);
+                    _setPlrShowdownVal(plrDataId, showdownVal);
                 }
             }
         }

@@ -30,7 +30,7 @@ contract ConfStoreHelper {
 
     struct Pot {
         uint256 amount;
-        uint8[] players;
+        bool[] players;
     }
 
     struct Action {
@@ -372,25 +372,22 @@ contract ConfStoreHelper {
         );
         return abi.decode(val, (uint));
     }
+
     function _setTblPotsComplete(
         Suave.DataId tblDataId,
-        uint potsComplete
+        Pot memory pot
     ) internal {
-        Suave.confidentialStore(
-            tblDataId,
-            "tblPotsComplete",
-            abi.encode(potsComplete)
-        );
+        Suave.confidentialStore(tblDataId, "tblPotsComplete", abi.encode(pot));
     }
 
     function _getTblPotsComplete(
         Suave.DataId tblDataId
-    ) internal returns (uint) {
+    ) internal returns (Pot memory) {
         bytes memory val = Suave.confidentialRetrieve(
             tblDataId,
             "tblPotsComplete"
         );
-        return abi.decode(val, (uint));
+        return abi.decode(val, (Pot));
     }
 
     function _setTblFlop(
