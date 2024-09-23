@@ -325,12 +325,12 @@ contract ConfStoreHelper {
 
     function _getTblClosingActionCount(
         Suave.DataId tblDataId
-    ) internal returns (uint) {
+    ) internal returns (int) {
         bytes memory val = Suave.confidentialRetrieve(
             tblDataId,
             "tblClosingActionCount"
         );
-        return abi.decode(val, (uint));
+        return abi.decode(val, (int));
     }
 
     function _setTblLastActionType(
@@ -339,7 +339,7 @@ contract ConfStoreHelper {
     ) internal {
         Suave.confidentialStore(
             tblDataId,
-            "tblHandStage",
+            "tblLastActionType",
             abi.encode(lastActionType)
         );
     }
@@ -349,7 +349,7 @@ contract ConfStoreHelper {
     ) internal returns (ActionType) {
         bytes memory val = Suave.confidentialRetrieve(
             tblDataId,
-            "tblHandStage"
+            "tblLastActionType"
         );
         return abi.decode(val, (ActionType));
     }
@@ -360,7 +360,7 @@ contract ConfStoreHelper {
     ) internal {
         Suave.confidentialStore(
             tblDataId,
-            "tblBettingOver",
+            "tblLastAmount",
             abi.encode(lastAmount)
         );
     }
@@ -368,7 +368,7 @@ contract ConfStoreHelper {
     function _getTblLastAmount(Suave.DataId tblDataId) internal returns (uint) {
         bytes memory val = Suave.confidentialRetrieve(
             tblDataId,
-            "tblBettingOver"
+            "tblLastAmount"
         );
         return abi.decode(val, (uint));
     }
@@ -393,7 +393,7 @@ contract ConfStoreHelper {
         return abi.decode(val, (uint));
     }
 
-    function _setFlop(
+    function _setTblFlop(
         Suave.DataId tblDataId,
         uint8 c0,
         uint8 c1,
@@ -402,37 +402,37 @@ contract ConfStoreHelper {
         Suave.confidentialStore(tblDataId, "tblFlop", abi.encode(c0, c1, c2));
     }
 
-    function _getFlop(
+    function _getTblFlop(
         Suave.DataId tblDataId
     ) internal returns (uint8, uint8, uint8) {
         bytes memory val = Suave.confidentialRetrieve(tblDataId, "tblFlop");
         return abi.decode(val, (uint8, uint8, uint8));
     }
 
-    function _setTurn(Suave.DataId tblDataId, uint8 c0) internal {
+    function _setTblTurn(Suave.DataId tblDataId, uint8 c0) internal {
         Suave.confidentialStore(tblDataId, "tblTurn", abi.encode(c0));
     }
 
-    function _getTurn(Suave.DataId tblDataId) internal returns (uint8) {
+    function _getTblTurn(Suave.DataId tblDataId) internal returns (uint8) {
         bytes memory val = Suave.confidentialRetrieve(tblDataId, "tblTurn");
         return abi.decode(val, (uint8));
     }
 
-    function _setRiver(Suave.DataId tblDataId, uint8 c0) internal {
+    function _setTblRiver(Suave.DataId tblDataId, uint8 c0) internal {
         Suave.confidentialStore(tblDataId, "tblRiver", abi.encode(c0));
     }
 
-    function _getRiver(Suave.DataId tblDataId) internal returns (uint8) {
+    function _getTblRiver(Suave.DataId tblDataId) internal returns (uint8) {
         bytes memory val = Suave.confidentialRetrieve(tblDataId, "tblRiver");
         return abi.decode(val, (uint8));
     }
 
-    function _setCardBits(Suave.DataId tblDataId, uint64 bits) internal {
-        Suave.confidentialStore(tblDataId, "tblCardBits", abi.encode(bits));
+    function _setCardBits(Suave.DataId rngDataId, uint64 bits) internal {
+        Suave.confidentialStore(rngDataId, "rngCardBits", abi.encode(bits));
     }
 
-    function _getCardBits(Suave.DataId tblDataId) internal returns (uint64) {
-        bytes memory val = Suave.confidentialRetrieve(tblDataId, "tblCardBits");
+    function _getCardBits(Suave.DataId rngDataId) internal returns (uint64) {
+        bytes memory val = Suave.confidentialRetrieve(rngDataId, "rngCardBits");
         return abi.decode(val, (uint64));
     }
 
