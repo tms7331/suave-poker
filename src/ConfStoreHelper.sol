@@ -373,19 +373,30 @@ contract ConfStoreHelper {
         return abi.decode(val, (uint));
     }
 
+    function _setNumPots(Suave.DataId tblDataId, uint numPots) internal {
+        Suave.confidentialStore(tblDataId, "tblNumPots", abi.encode(numPots));
+    }
+
+    function _getNumPots(Suave.DataId tblDataId) internal returns (uint) {
+        bytes memory val = Suave.confidentialRetrieve(tblDataId, "tblNumPots");
+        return abi.decode(val, (uint));
+    }
+
     function _setTblPotsComplete(
-        Suave.DataId tblDataId,
+        Suave.DataId plrDataId,
         Pot memory pot
     ) internal {
-        Suave.confidentialStore(tblDataId, "tblPotsComplete", abi.encode(pot));
+        // Using plrDataId here because the max number of total pots is equal
+        // to the number of players minus 1
+        Suave.confidentialStore(plrDataId, "plrPotsComplete", abi.encode(pot));
     }
 
     function _getTblPotsComplete(
-        Suave.DataId tblDataId
+        Suave.DataId plrDataId
     ) internal returns (Pot memory) {
         bytes memory val = Suave.confidentialRetrieve(
-            tblDataId,
-            "tblPotsComplete"
+            plrDataId,
+            "plrPotsComplete"
         );
         return abi.decode(val, (Pot));
     }

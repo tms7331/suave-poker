@@ -135,8 +135,7 @@ contract SuavePokerTable is ConfStoreHelper {
         _setTblClosingActionCount(tblRec.id, 0);
         _setTblLastActionType(tblRec.id, ActionType.Null);
         _setTblLastAmount(tblRec.id, 0);
-        Pot memory pot = Pot({players: new bool[](numSeats), amount: 0});
-        _setTblPotsComplete(tblRec.id, pot);
+        _setNumPots(tblRec.id, 0);
         _setTblFlop(tblRec.id, 53, 53, 53);
         _setTblTurn(tblRec.id, 53);
         _setTblRiver(tblRec.id, 53);
@@ -233,7 +232,7 @@ contract SuavePokerTable is ConfStoreHelper {
         _setPlrStack(plrDataId, depositAmount);
         _setPlrHolecards(plrDataId, 53, 53);
         _setPlrAutoPost(plrDataId, autoPost);
-        _setPlrSittingOut(plrDataId, true);
+        _setPlrSittingOut(plrDataId, false);
         _setPlrBetStreet(plrDataId, 0);
         _setPlrShowdownVal(plrDataId, 0);
         _setPlrLastActionType(plrDataId, ActionType.Null);
@@ -309,6 +308,8 @@ contract SuavePokerTable is ConfStoreHelper {
     ) external {
         address player = msg.sender;
 
+        uint8 whoseTurn = _getTblWhoseTurn(tblDataId);
+        require(whoseTurn == seatI, "Not your turn!");
         Suave.DataId plrDataId = plrDataIdArr[seatI];
 
         // Group player-related variables into a struct
@@ -366,16 +367,9 @@ contract SuavePokerTable is ConfStoreHelper {
         } else if (actionType == ActionType.Bet) {
             _setTblClosingActionCount(tblDataId, 0);
         }
-        // else {
-        //     _setTblClosingActionCount(
-        //         tblDataId,
-        //         _getTblClosingActionCount(tblDataId) + 1
-        //     );
-        // }
 
         _incrementWhoseTurn();
 
-        // TODOTODO - review all these values... think action should not be fold?
         _setTblLastRaise(tblDataId, hsNew.lastRaise);
         _setTblLastActionType(tblDataId, hsNew.lastActionType);
         _setTblLastAmount(tblDataId, hsNew.lastActionAmount);
@@ -415,7 +409,6 @@ contract SuavePokerTable is ConfStoreHelper {
         } else if (actionType == ActionType.Fold) {
             newHandState.lastActionAmount = 0;
         } else if (actionType == ActionType.Call) {
-            console.log(handState.facingBet);
             uint newCallAmount = handState.facingBet -
                 handState.playerBetStreet;
             if (newCallAmount > handState.playerStack) {
@@ -555,6 +548,7 @@ contract SuavePokerTable is ConfStoreHelper {
         else if (handStage == HandStage.FlopDeal) {
             _dealFlop();
             _setTblHandStage(tblDataId, HandStage.FlopBetting);
+            _transitionHandStage(false);
             return;
         }
         // Flop Betting
@@ -570,6 +564,7 @@ contract SuavePokerTable is ConfStoreHelper {
         else if (handStage == HandStage.TurnDeal) {
             _dealTurn();
             _setTblHandStage(tblDataId, HandStage.TurnBetting);
+            _transitionHandStage(false);
             return;
         }
         // Turn Betting
@@ -585,6 +580,7 @@ contract SuavePokerTable is ConfStoreHelper {
         else if (handStage == HandStage.RiverDeal) {
             _dealRiver();
             _setTblHandStage(tblDataId, HandStage.RiverBetting);
+            _transitionHandStage(false);
             return;
         }
         // River Betting
@@ -618,6 +614,10 @@ contract SuavePokerTable is ConfStoreHelper {
         uint256 activePlayers = 0;
         for (uint256 i = 0; i < numSeats; i++) {
             Suave.DataId plrDataId = plrDataIdArr[i];
+            bool cond1 = _getPlrAddr(plrDataId) != address(0);
+            bool cond2 = _getPlrSittingOut(plrDataId) == false;
+            uint cond1u = cond1 ? 1 : 0;
+            uint cond2u = cond2 ? 1 : 0;
             if (
                 _getPlrAddr(plrDataId) != address(0) &&
                 _getPlrSittingOut(plrDataId) == false
@@ -662,7 +662,7 @@ contract SuavePokerTable is ConfStoreHelper {
 
             // The player must be in the hand and have some funds
             if (_getPlrInHand(plrDataId) && _getPlrStack(plrDataId) > 0) {
-                _setTblWhoseTurn(tblDataId, uint8(i));
+                _setTblWhoseTurn(tblDataId, uint8(seatI));
                 incremented = true;
                 break;
             }
@@ -686,9 +686,7 @@ contract SuavePokerTable is ConfStoreHelper {
         _setTblFlop(tblDataId, 53, 53, 53);
         _setTblTurn(tblDataId, 53);
         _setTblRiver(tblDataId, 53);
-
-        // TODOTODO - how do we set this?
-        // _setTblPotsComplete(tblDataId, 0);
+        _setNumPots(tblDataId, 0);
 
         // Reset players
         for (uint i = 0; i < numSeats; i++) {
@@ -718,7 +716,6 @@ contract SuavePokerTable is ConfStoreHelper {
         }
 
         _incrementButton();
-        // whoseTurn = button;
         uint8 button = _getTblButton(tblDataId);
         _setTblWhoseTurn(tblDataId, button);
         _incrementHandId();
@@ -739,6 +736,12 @@ contract SuavePokerTable is ConfStoreHelper {
         }
 
         uint potAmount = _getTblPotInitial(tblDataId);
+
+        uint numPots = _getNumPots(tblDataId);
+        for (uint256 i = 0; i < numPots; i++) {
+            Pot memory pot = _getTblPotsComplete(plrDataIdArr[i]);
+            potAmount -= pot.amount;
+        }
         for (uint256 i = 0; i < numSeats; i++) {
             Suave.DataId plrDataId = plrDataIdArr[i];
             potAmount += _getPlrBetStreet(plrDataId);
@@ -747,43 +750,40 @@ contract SuavePokerTable is ConfStoreHelper {
         Pot memory mainPot;
         mainPot.players = streetPlayers;
         mainPot.amount = potAmount;
-        _setTblPotsComplete(tblDataId, mainPot);
 
-        // TODO - we need to calculate this...
-        // Calculate the main pot amount
-        // uint256 mainPotAmount = potInitial;
-        // for (uint256 i = 0; i < potsComplete.length; i++) {
-        //     mainPotAmount -= potsComplete[i].amount;
-        // }
+        uint potI = _getNumPots(tblDataId);
+        _setTblPotsComplete(plrDataIdArr[potI], mainPot);
+        _setNumPots(tblDataId, potI + 1);
+    }
 
-        // Create the main pot and push to potsComplete
-        // main_pot = {"players": street_players, "amount": main_pot_amount}
-        //Pot memory mainPot;
-        // TODO - fix here too...
-        // mainPot.amount = mainPotAmount;
-        // mainPot.players = new uint256[](playerCount);
-        // for (uint256 i = 0; i < playerCount; i++) {
-        //     mainPot.players[i] = streetPlayers[i];
-        // }
-
-        // potsComplete.push(mainPot);
+    function _sort(uint[] memory data) internal pure returns (uint[] memory) {
+        uint n = data.length;
+        for (uint i = 0; i < n; i++) {
+            for (uint j = 0; j < n - i - 1; j++) {
+                if (data[j] > data[j + 1]) {
+                    // Swap the elements
+                    uint temp = data[j];
+                    data[j] = data[j + 1];
+                    data[j + 1] = temp;
+                }
+            }
+        }
+        return data;
     }
 
     function _nextStreet() internal {
-        // TODOTODO - set these, figure out how we're tracking them...
-        // tblPotInitial(Suave.DataId tblDataId,uint potInitial)
-        // tblPotsComplete(Suave.DataId tblDataId,uint potsComplete)
-
         // Set the turn to the next player
         uint8 button = _getTblButton(tblDataId);
         // TODO - can we improve this logic?
         if (button == 0) {
-            button = uint8(numSeats);
+            button = uint8(numSeats - 1);
         } else {
             button = uint8((button - 1) % numSeats);
         }
         _setTblWhoseTurn(tblDataId, button);
         _incrementWhoseTurn();
+
+        uint8 whoseTurn = _getTblWhoseTurn(tblDataId);
 
         // Reset table betting state
         _setTblFacingBet(tblDataId, 0);
@@ -793,6 +793,80 @@ contract SuavePokerTable is ConfStoreHelper {
         _setTblClosingActionCount(tblDataId, 0);
 
         uint256 potInitialNew = _getTblPotInitial(tblDataId);
+
+        uint256 potInitialLeft = potInitialNew;
+        uint numPots = _getNumPots(tblDataId);
+        for (uint256 i = 0; i < numPots; i++) {
+            Pot memory pot = _getTblPotsComplete(plrDataIdArr[i]);
+            potInitialLeft -= pot.amount;
+        }
+
+        // Track the amounts each player bet on this street
+        uint256[] memory betThisStreetAmounts = new uint256[](numSeats);
+        bool[] memory inHand = new bool[](numSeats);
+        uint256[] memory allInAmountsSorted = new uint256[](numSeats);
+        bool allIn = false;
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId = plrDataIdArr[i];
+            inHand[i] = _getPlrInHand(plrDataId);
+            betThisStreetAmounts[i] = _getPlrBetStreet(plrDataId);
+            if (betThisStreetAmounts[i] > 0 && _getPlrStack(plrDataId) == 0) {
+                allIn = true;
+                allInAmountsSorted[i] = betThisStreetAmounts[i];
+            }
+        }
+
+        if (allIn) {
+            // If our scenario was
+            // [50, 60, 40, 50] (bet this street)
+            // [true, true, true, false] (in hand)
+            // [50, 0, 40, 0] (all-in amounts)
+            // [0, 19, 0, 50] (stacks remaining)
+            // We want to end up with:
+            // 120 (40*4) with players 0, 1, 2
+            // 30 (10*3) with players 0, 1
+            allInAmountsSorted = _sort(allInAmountsSorted);
+            // And clean up a arrays, from [0, 0, 40, 50] we want: [0, 0, 40, 10]
+            for (uint256 i = 0; i < numSeats; i++) {
+                for (uint256 j = i + 1; j < numSeats; j++) {
+                    allInAmountsSorted[j] -= allInAmountsSorted[i];
+                }
+            }
+
+            for (uint256 i = 0; i < numSeats; i++) {
+                // With the arrays/sorting lots of the pots will be 0, so skip them
+                if (allInAmountsSorted[i] == 0) {
+                    continue;
+                }
+
+                uint256 amount = allInAmountsSorted[i];
+                // Just for the first hand - should include this
+                uint256 potAmount = potInitialLeft;
+                potInitialLeft = 0;
+
+                Pot memory sidePot;
+                // So we have to update -
+                sidePot.players = new bool[](numSeats);
+                for (uint256 j = 0; j < numSeats; j++) {
+                    if (betThisStreetAmounts[j] >= amount) {
+                        potAmount += amount;
+                        betThisStreetAmounts[j] -= amount;
+                        if (inHand[j]) {
+                            sidePot.players[j] = true;
+                        }
+                    } else {
+                        potAmount += betThisStreetAmounts[j];
+                        betThisStreetAmounts[j] = 0;
+                    }
+                }
+                sidePot.amount = potAmount;
+
+                uint potI = _getNumPots(tblDataId);
+                _setTblPotsComplete(plrDataIdArr[potI], sidePot);
+                _setNumPots(tblDataId, potI + 1);
+            }
+        }
+
         // Reset player betting state
         for (uint256 i = 0; i < numSeats; i++) {
             Suave.DataId plrDataId = plrDataIdArr[i];
@@ -801,94 +875,6 @@ contract SuavePokerTable is ConfStoreHelper {
             _setPlrLastActionType(plrDataId, ActionType.Null);
             _setPlrLastAmount(plrDataId, 0);
         }
-        /*
-
-        // Calculate remaining pot after previous side pots
-        uint256 potInitialLeft = potInitialNew;
-        // TODO - need handling for side pots...
-        // for (uint256 i = 0; i < potsComplete.length; i++) {
-        //     potInitialLeft -= potsComplete[i].amount;
-        // }
-
-        // Track the amounts each player bet on this street
-        uint256[] memory betThisStreetAmounts = new uint256[](numSeats);
-
-        for (uint256 i = 0; i < numSeats; i++) {
-            Suave.DataId plrDataId = plrDataIdArr[i];
-            if (_getPlrInHand(plrDataId)) {
-                betThisStreetAmounts[i] = _getPlrBetStreet(plrDataId);
-            }
-        }
-
-
-        // Determine street players and handle all-ins
-        uint256[] memory streetPlayers = new uint256[](numSeats);
-        uint256 playerCount = 0;
-        Pot[] memory sidePots = new Pot[](numSeats); // Temporary storage for side pots
-
-        for (uint256 i = 0; i < numSeats; i++) {
-            Suave.DataId plrDataId = plrDataIdArr[i];
-            if (_getPlrInHand(plrDataId) && _getPlrBetStreet(plrDataId) > 0) {
-                streetPlayers[playerCount++] = i;
-            }
-
-            // Handle all-in players
-            if (
-                _getPlrStack(plrDataId) == 0 && _getPlrBetStreet(plrDataId) > 0
-            ) {
-                sidePots[i].amount = _getPlrBetStreet(plrDataId);
-                // sidePots;
-                // TODO - figure out handling
-                // sidePots[i].players[0] = i;
-            }
-
-            // Reset player action
-            _setPlrBetStreet(plrDataId, 0);
-            _setPlrLastActionType(plrDataId, ActionType.Null);
-            _setPlrLastAmount(plrDataId, 0);
-        }
-
-        // Sort all-ins by the amount they bet
-        for (uint256 i = 0; i < playerCount; i++) {
-            for (uint256 j = i + 1; j < playerCount; j++) {
-                if (sidePots[i].amount > sidePots[j].amount) {
-                    Pot memory temp = sidePots[i];
-                    sidePots[i] = sidePots[j];
-                    sidePots[j] = temp;
-                }
-            }
-        }
-
-        // Allocate side pots
-        for (uint256 i = 0; i < playerCount; i++) {
-            uint256 minBetAmount = sidePots[i].amount;
-            uint256 sidePotAmount = 0;
-
-            for (uint256 j = 0; j < playerCount; j++) {
-                sidePotAmount += betThisStreetAmounts[j] > minBetAmount
-                    ? minBetAmount
-                    : betThisStreetAmounts[j];
-                betThisStreetAmounts[j] -= minBetAmount;
-            }
-
-            if (i == 0) {
-                sidePotAmount += potInitialLeft;
-            }
-
-            sidePots[i].amount = sidePotAmount;
-            // TODO - how are we tracking side pots...
-            // potsComplete.push(sidePots[i]);
-
-            // Remove the all-in player from street players
-            for (uint256 j = 0; j < playerCount; j++) {
-                if (streetPlayers[j] == sidePots[i].players[0]) {
-                    streetPlayers[j] = streetPlayers[playerCount - 1];
-                    playerCount--;
-                    break;
-                }
-            }
-        }
-        */
 
         _setTblPotInitial(tblDataId, potInitialNew);
     }
@@ -906,60 +892,41 @@ contract SuavePokerTable is ConfStoreHelper {
             lookupVals[i] = showdownVal;
         }
 
-        Pot memory pot = _getTblPotsComplete(tblDataId);
-        uint256 winnerVal = 9000;
+        uint numPots = _getNumPots(tblDataId);
+        for (uint256 potI = 0; potI < numPots; potI++) {
+            Pot memory pot = _getTblPotsComplete(plrDataIdArr[potI]);
 
-        bool[] memory isWinner = new bool[](numSeats);
+            uint256 winnerVal = 9000;
 
-        uint256 winnerCount = 0;
-        for (uint256 i = 0; i < numSeats; i++) {
-            if (pot.players[i] && lookupVals[i] <= winnerVal) {
-                if (lookupVals[i] < winnerVal) {
-                    // Ugly but we have to clear out previous winners
-                    for (uint256 j = 0; j < numSeats; j++) {
-                        isWinner[j] = false;
+            bool[] memory isWinner = new bool[](numSeats);
+
+            uint256 winnerCount = 0;
+            for (uint256 i = 0; i < numSeats; i++) {
+                if (pot.players[i] && lookupVals[i] <= winnerVal) {
+                    if (lookupVals[i] < winnerVal) {
+                        // Ugly but we have to clear out previous winners
+                        for (uint256 j = 0; j < numSeats; j++) {
+                            isWinner[j] = false;
+                        }
+                        winnerVal = lookupVals[i];
+                        isWinner[i] = true;
+                        winnerCount = 1;
+                    } else {
+                        isWinner[i] = true;
+                        winnerCount++;
                     }
-                    winnerVal = lookupVals[i];
-                    isWinner[i] = true;
-                    winnerCount = 1;
-                } else {
-                    isWinner[i] = true;
-                    winnerCount++;
+                }
+            }
+            // Credit winnings
+            for (uint256 i = 0; i < numSeats; i++) {
+                if (isWinner[i]) {
+                    _setPlrStack(
+                        plrDataIdArr[i],
+                        _getPlrStack(plrDataIdArr[i]) + pot.amount / winnerCount
+                    );
                 }
             }
         }
-
-        // Credit winnings
-        for (uint256 i = 0; i < numSeats; i++) {
-            if (isWinner[i]) {
-                _setPlrStack(
-                    plrDataIdArr[i],
-                    _getPlrStack(plrDataIdArr[i]) + pot.amount / winnerCount
-                );
-            }
-        }
-
-        /*
-        for pot in self.pots_complete:
-            winner_val = 9000
-            winner_i = []
-            # Will consist of 'amount' and 'players'
-            for seat_i in pot["players"]:
-                if self.seats[seat_i]["showdown_val"] < winner_val:
-                    winner_val = self.seats[seat_i]["showdown_val"]
-                    winner_i = [seat_i]
-                elif self.seats[seat_i]["showdown_val"] == winner_val:
-                    winner_i.append(seat_i)
-            # Credit winnings
-            for seat_i in winner_i:
-                self.seats[seat_i]["stack"] += pot["amount"] / len(winner_i)
-            # And add our event
-            # [{ potTotal: 60, winners: { 0: 60 } }];
-            # pot_dict = {seat_i: pot["amount"] / len(winner_i) for seat_i in winner_i}
-            winner_dict = {seat_i: pot["amount"] / len(winner_i) for seat_i in winner_i}
-            pot_dict = {"potTotal": pot["amount"], "winners": winner_dict}
-            action["pots"].append(pot_dict)
-            */
     }
 
     function _getShowdownVal(
