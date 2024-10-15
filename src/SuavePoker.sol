@@ -2,12 +2,16 @@
 pragma solidity ^0.8.13;
 import "forge-std/console.sol";
 import "suave-std/suavelib/Suave.sol";
+import "suave-std/Suapp.sol";
 import "suave-std/Context.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {RNG} from "./RNG.sol";
 import {ConfStoreHelper} from "./ConfStoreHelper.sol";
+import {Emitter} from "./Emitter.sol";
 
-contract SuavePokerTable is ConfStoreHelper {
+contract SuavePokerTable is ConfStoreHelper, Emitter, Suapp {
     // Core table values...
+    uint public tableId;
     uint public smallBlind;
     uint public bigBlind;
     uint public minBuyin;
@@ -37,36 +41,16 @@ contract SuavePokerTable is ConfStoreHelper {
         uint lastRaise;
     }
 
-    event PlayerJoined(address player, uint8 seat, uint stack);
-
-    event JoinTable(
-        address indexed player,
-        uint256 seat,
-        uint256 depositAmount
-    );
-    event LeaveTable(address indexed player, uint256 seat);
-    event Rebuy(address indexed player, uint256 seat, uint256 rebuyAmount);
-    event FlopDealt(uint8[3] cards);
-    event TurnDealt(uint8 card);
-    event RiverDealt(uint8 card);
-    event CardsDealt();
-    event GameStateUpdated(
-        uint256 potInitial,
-        uint256 potTotal,
-        uint256 whoseTurn,
-        uint8[] board,
-        uint8 handStage,
-        uint256 facingBet,
-        uint256 lastRaise
-    );
-
     constructor(
+        uint _tableId,
         uint _smallBlind,
         uint _bigBlind,
         uint _minBuyin,
         uint _maxBuyin,
         uint _numSeats
     ) {
+        // Issue is - tableId must be unique
+        tableId = _tableId;
         smallBlind = _smallBlind;
         bigBlind = _bigBlind;
         // TODO - add assertions for min/max buyins
@@ -79,6 +63,20 @@ contract SuavePokerTable is ConfStoreHelper {
 
         plrDataIdArr = new Suave.DataId[](_numSeats);
     }
+
+    // constructor() {
+    //     smallBlind = 1;
+    //     bigBlind = 2;
+    //     // TODO - add assertions for min/max buyins
+    //     minBuyin = 1;
+    //     maxBuyin = 1000;
+    //     numSeats = 6;
+    //     addressList = new address[](1);
+    //     // from Suave.sol: address public constant ANYALLOWED = 0xC8df3686b4Afb2BB53e60EAe97EF043FE03Fb829;
+    //     addressList[0] = 0xC8df3686b4Afb2BB53e60EAe97EF043FE03Fb829;
+
+    //     plrDataIdArr = new Suave.DataId[](6);
+    // }
 
     function initTableCallback(
         Suave.DataId _rngDataId,
@@ -93,19 +91,8 @@ contract SuavePokerTable is ConfStoreHelper {
         }
     }
 
-    function joinTableCallback(
-        address player,
-        uint8 seatI,
-        uint stack,
-        Suave.DataId _plrDataId
-    ) public payable {
-        // First time this will initialize seat,
-        // after that we'll always return the same value
-        plrDataIdArr[seatI] = _plrDataId;
-        emit PlayerJoined(player, seatI, stack);
-    }
-
-    function nullCallback() public payable {}
+    // Will let us publicly emit logs
+    function onchain() public emitOffchainLogs {}
 
     function initTable() external returns (bytes memory) {
         Suave.DataRecord memory rngRec = Suave.newDataRecord(
@@ -148,6 +135,8 @@ contract SuavePokerTable is ConfStoreHelper {
             Suave.DataId plrDataId = _initializeSeat();
             _plrDataIdArr[i] = plrDataId;
         }
+
+        emitInitialized(tableId, numSeats);
 
         return
             abi.encodeWithSelector(
@@ -192,12 +181,19 @@ contract SuavePokerTable is ConfStoreHelper {
         return stackNew >= minBuyin && stackNew <= maxBuyin;
     }
 
-    function joinTable(
-        uint8 seatI,
-        address plrAddr,
-        uint depositAmount,
-        bool autoPost
-    ) external returns (bytes memory) {
+    function joinTableB() external returns (bytes memory) {
+        uint8 seatI = 0;
+        address plrAddr = msg.sender;
+        uint depositAmount = 100;
+        bool autoPost = false;
+        // TODOTODO - check these...
+        // assert 0 <= seat_i <= self.num_seats - 1, "Invalid seat_i!"
+        //   assert self.seats[seat_i] == None, "seat_i taken!"
+        //   assert address not in self.player_to_seat, "Player already joined!"
+        //   assert (
+        //       self.min_buyin <= deposit_amount <= self.max_buyin
+        //   ), "Invalid deposit amount!"
+
         require(seatI >= 0 && seatI < numSeats, "Invalid seat!");
         require(initComplete, "Table not initialized");
         // If they havent jointed the table we need to initialize
@@ -207,9 +203,9 @@ contract SuavePokerTable is ConfStoreHelper {
         require(_getPlrAddr(plrDataId) == address(0));
         // Prevent player from joining multiple times - more efficient way to do this?
         for (uint256 i = 0; i < numSeats; i++) {
-            Suave.DataId plrDataId = plrDataIdArr[i];
+            Suave.DataId plrDataId_ = plrDataIdArr[i];
             require(
-                _getPlrAddr(plrDataId) != plrAddr,
+                _getPlrAddr(plrDataId_) != plrAddr,
                 "Player already joined!"
             );
         }
@@ -226,6 +222,10 @@ contract SuavePokerTable is ConfStoreHelper {
         // They must also to pass in a random number to seed the RNG
         bytes memory noise = Context.confidentialInputs();
         RNG.addNoise(rngDataId, noise);
+        // And we'll also use it as their secret for this table...
+        bytes32 secret = bytes32(noise);
+        console.log("setting secret", uint256(secret));
+        _setPlrSecret(plrDataId, secret);
 
         _setPlrAddr(plrDataId, plrAddr);
 
@@ -251,29 +251,106 @@ contract SuavePokerTable is ConfStoreHelper {
             _setTblButton(tblDataId, seatI);
             _setTblWhoseTurn(tblDataId, seatI);
         }
+        emitJoinTable(tableId, plrAddr, seatI, depositAmount);
 
-        // For now - play money, just give them the deposit amount they want
-        // _deposit(depositAmount);
-        return
-            abi.encodeWithSelector(
-                this.joinTableCallback.selector,
-                msg.sender,
-                seatI,
-                depositAmount
-            );
+        return abi.encodeWithSelector(this.onchain.selector);
     }
 
-    function leaveTable(uint256 seatI) public {
+    function joinTable(
+        uint8 seatI,
+        address plrAddr,
+        uint depositAmount,
+        bool autoPost
+    ) external returns (bytes memory) {
+        // TODOTODO - check these...
+        // assert 0 <= seat_i <= self.num_seats - 1, "Invalid seat_i!"
+        //   assert self.seats[seat_i] == None, "seat_i taken!"
+        //   assert address not in self.player_to_seat, "Player already joined!"
+        //   assert (
+        //       self.min_buyin <= deposit_amount <= self.max_buyin
+        //   ), "Invalid deposit amount!"
+
+        require(seatI >= 0 && seatI < numSeats, "Invalid seat!");
+        require(initComplete, "Table not initialized");
+        // If they havent jointed the table we need to initialize
+        Suave.DataId plrDataId = plrDataIdArr[seatI];
+
+        // Make sure it's ok for them to join (seat available)
+        require(_getPlrAddr(plrDataId) == address(0));
+        // Prevent player from joining multiple times - more efficient way to do this?
+        // TODO - reenable this, have to figure out play...
+        /*
+        for (uint256 i = 0; i < numSeats; i++) {
+            Suave.DataId plrDataId_ = plrDataIdArr[i];
+            require(
+                _getPlrAddr(plrDataId_) != plrAddr,
+                "Player already joined!"
+            );
+        }
+        */
+
+        // require(playerToSeat[addr] == 0, "Player already joined!");
+        require(
+            depositAmount >= minBuyin && depositAmount <= maxBuyin,
+            "Invalid deposit amount!"
+        );
+
+        // Make sure their deposit amount is in bounds
+        require(_depositOk(0, depositAmount));
+
+        // They must also to pass in a random number to seed the RNG
+        bytes memory noise = Context.confidentialInputs();
+        RNG.addNoise(rngDataId, noise);
+
+        bytes32 secret = bytes32(noise);
+        console.log("setting secret", uint256(secret));
+        _setPlrSecret(plrDataId, secret);
+
+        _setPlrAddr(plrDataId, plrAddr);
+
+        _setPlrStack(plrDataId, depositAmount);
+        _setPlrHolecards(plrDataId, 53, 53);
+        _setPlrAutoPost(plrDataId, autoPost);
+        _setPlrSittingOut(plrDataId, false);
+        _setPlrBetStreet(plrDataId, 0);
+        _setPlrShowdownVal(plrDataId, 0);
+        _setPlrLastActionType(plrDataId, ActionType.Null);
+        _setPlrLastAmount(plrDataId, 0);
+
+        HandStage handStage = _getTblHandStage(tblDataId);
+
+        if (handStage != HandStage.SBPostStage) {
+            _setPlrInHand(plrDataId, false);
+        } else {
+            _setPlrInHand(plrDataId, true);
+        }
+
+        // Assign button if it's the first player
+        if (getPlayerCount() == 1) {
+            _setTblButton(tblDataId, seatI);
+            _setTblWhoseTurn(tblDataId, seatI);
+        }
+        emitJoinTable(tableId, plrAddr, seatI, depositAmount);
+
+        return abi.encodeWithSelector(this.onchain.selector);
+    }
+
+    function leaveTable(uint256 seatI) public returns (bytes memory) {
         Suave.DataId plrDataId = plrDataIdArr[seatI];
         require(_getPlrAddr(plrDataId) == msg.sender, "Player not at seat!");
 
         _setPlrAddr(plrDataId, address(0));
 
-        // TODO - this needs a callback
-        emit LeaveTable(msg.sender, seatI);
+        // TODO - send them their funds
+        uint256 amountStack = _getPlrStack(plrDataId);
+        emitLeaveTable(tableId, msg.sender, seatI);
+        return abi.encodeWithSelector(this.onchain.selector);
     }
 
-    function rebuy(uint256 seatI, uint256 rebuyAmount) public {
+    function rebuy(
+        uint256 seatI,
+        uint256 rebuyAmount
+    ) public returns (bytes memory) {
         Suave.DataId plrDataId = plrDataIdArr[seatI];
         require(_getPlrAddr(plrDataId) == msg.sender, "Player not at seat!");
         uint stack = _getPlrStack(plrDataId);
@@ -285,8 +362,8 @@ contract SuavePokerTable is ConfStoreHelper {
 
         _setPlrStack(plrDataId, newStack);
 
-        // TODO - this needs a callback
-        emit Rebuy(msg.sender, seatI, rebuyAmount);
+        emitRebuy(tableId, msg.sender, seatI, newStack);
+        return abi.encodeWithSelector(this.onchain.selector);
     }
 
     function getPlayerCount() internal returns (uint256) {
@@ -302,10 +379,10 @@ contract SuavePokerTable is ConfStoreHelper {
 
     function takeAction(
         ActionType actionType,
-        uint seatI,
+        uint8 seatI,
         uint256 amount,
         bool externalAction
-    ) external {
+    ) external returns (bytes memory) {
         address player = msg.sender;
 
         uint8 whoseTurn = _getTblWhoseTurn(tblDataId);
@@ -369,7 +446,6 @@ contract SuavePokerTable is ConfStoreHelper {
         }
 
         _incrementWhoseTurn();
-
         _setTblLastRaise(tblDataId, hsNew.lastRaise);
         _setTblLastActionType(tblDataId, hsNew.lastActionType);
         _setTblLastAmount(tblDataId, hsNew.lastActionAmount);
@@ -377,6 +453,19 @@ contract SuavePokerTable is ConfStoreHelper {
         _transitionHandStage(
             actionType == ActionType.SBPost || actionType == ActionType.BBPost
         );
+
+        uint pot = _getTblPotInitial(tblDataId);
+        emitTakeAction(
+            tableId,
+            player,
+            seatI,
+            uint256(actionType),
+            amount,
+            hsNew.playerBetStreet,
+            pot
+        );
+
+        return abi.encodeWithSelector(this.onchain.selector);
     }
 
     function _transitionHandState(
@@ -387,18 +476,25 @@ contract SuavePokerTable is ConfStoreHelper {
         HandState memory newHandState = handState;
 
         if (actionType == ActionType.SBPost) {
+            // CHECKS:
+            // we're at the proper stage
             newHandState.facingBet = amount;
             newHandState.lastRaise = amount;
             newHandState.playerStack -= amount;
             newHandState.playerBetStreet = amount;
             newHandState.lastActionAmount = amount;
         } else if (actionType == ActionType.BBPost) {
+            // CHECKS:
+            // we're at the proper stage
             newHandState.facingBet = amount;
             newHandState.lastRaise = amount;
             newHandState.playerStack -= amount;
             newHandState.playerBetStreet = amount;
             newHandState.lastActionAmount = amount;
         } else if (actionType == ActionType.Bet) {
+            // CHECKS:
+            // facing action is valid
+            // bet amount is valid
             require(amount > handState.facingBet, "Invalid bet amount");
             uint newBetAmount = amount - handState.playerBetStreet;
             newHandState.playerStack -= newBetAmount;
@@ -407,8 +503,12 @@ contract SuavePokerTable is ConfStoreHelper {
             newHandState.lastRaise = amount - handState.facingBet;
             newHandState.lastActionAmount = newBetAmount;
         } else if (actionType == ActionType.Fold) {
+            // CHECKS:
+            // None?  But what if someone folds before they post SB/BB?
             newHandState.lastActionAmount = 0;
         } else if (actionType == ActionType.Call) {
+            // CHECKS:
+            // facing action is valid (bet, call, fold?)
             uint newCallAmount = handState.facingBet -
                 handState.playerBetStreet;
             if (newCallAmount > handState.playerStack) {
@@ -418,10 +518,13 @@ contract SuavePokerTable is ConfStoreHelper {
             newHandState.playerBetStreet += newCallAmount;
             newHandState.lastActionAmount = newCallAmount;
         } else if (actionType == ActionType.Check) {
+            // CHECKS:
+            // facing action is valid (check, None)
             newHandState.lastActionAmount = 0;
         }
 
-        require(newHandState.playerStack >= 0, "Insufficient funds");
+        // We'll get an underflow if they don't have enough funds
+        // require(newHandState.playerStack >= 0, "Insufficient funds");
         newHandState.lastActionType = actionType;
 
         return newHandState;
@@ -481,11 +584,24 @@ contract SuavePokerTable is ConfStoreHelper {
 
     function _dealHolecards() internal {
         uint8[] memory cards;
-        for (uint256 seat_i = 0; seat_i < numSeats; seat_i++) {
-            Suave.DataId plrDataId = plrDataIdArr[seat_i];
+        uint handId = _getHandId(tblDataId);
+        for (uint8 seatI = 0; seatI < numSeats; seatI++) {
+            Suave.DataId plrDataId = plrDataIdArr[seatI];
             if (_getPlrInHand(plrDataId)) {
                 cards = _getNewCards(2);
                 _setPlrHolecards(tblDataId, cards[0], cards[1]);
+                // We need to encrypt the cards!
+                // We need a fresh secret for each hand...
+
+                bytes32 secret = _getPlrSecret(plrDataId);
+
+                bytes32 handSecret = keccak256(
+                    abi.encodePacked(handId, secret)
+                );
+
+                bytes32 card0 = bytes32(uint256(cards[0])) ^ handSecret;
+                bytes32 card1 = bytes32(uint256(cards[1])) ^ handSecret;
+                emitHolecards(tableId, seatI, card0, card1);
             }
         }
     }
@@ -494,6 +610,7 @@ contract SuavePokerTable is ConfStoreHelper {
         if (!allFolded()) {
             uint8[] memory cards = _getNewCards(3);
             _setTblFlop(tblDataId, cards[0], cards[1], cards[2]);
+            emitFlop(tableId, cards[0], cards[1], cards[2]);
         }
     }
 
@@ -501,6 +618,7 @@ contract SuavePokerTable is ConfStoreHelper {
         if (!allFolded()) {
             uint8[] memory cards = _getNewCards(1);
             _setTblTurn(tblDataId, cards[0]);
+            emitTurn(tableId, cards[0]);
         }
     }
 
@@ -508,6 +626,7 @@ contract SuavePokerTable is ConfStoreHelper {
         if (!allFolded()) {
             uint8[] memory cards = _getNewCards(1);
             _setTblRiver(tblDataId, cards[0]);
+            emitRiver(tableId, cards[0]);
         }
     }
 
@@ -893,7 +1012,7 @@ contract SuavePokerTable is ConfStoreHelper {
         }
 
         uint numPots = _getNumPots(tblDataId);
-        for (uint256 potI = 0; potI < numPots; potI++) {
+        for (uint8 potI = 0; potI < numPots; potI++) {
             Pot memory pot = _getTblPotsComplete(plrDataIdArr[potI]);
 
             uint256 winnerVal = 9000;
@@ -918,24 +1037,36 @@ contract SuavePokerTable is ConfStoreHelper {
                 }
             }
             // Credit winnings
-            for (uint256 i = 0; i < numSeats; i++) {
+            for (uint8 i = 0; i < numSeats; i++) {
                 if (isWinner[i]) {
+                    uint256 amount = pot.amount / winnerCount;
+
                     _setPlrStack(
                         plrDataIdArr[i],
-                        _getPlrStack(plrDataIdArr[i]) + pot.amount / winnerCount
+                        _getPlrStack(plrDataIdArr[i]) + amount
                     );
+                    emitSettle(tableId, potI, amount, i);
+                    (uint8 card0, uint8 card1) = _getPlrHolecards(
+                        plrDataIdArr[i]
+                    );
+                    emitShowdown(tableId, i, card0, card1);
                 }
             }
         }
     }
 
-    function _getShowdownVal(
-        uint8[] memory cards
-    ) internal view returns (uint) {
+    function _getShowdownVal(uint8[] memory cards) internal returns (uint) {
         require(cards.length == 7, "Must provide 7 cards.");
 
-        // TODO - make API call here to start...
-        uint lookupVal = 33;
+        uint lookupVal = getLookupValue(
+            cards[0],
+            cards[1],
+            cards[2],
+            cards[3],
+            cards[4],
+            cards[5],
+            cards[6]
+        );
         return lookupVal;
     }
 
@@ -974,4 +1105,108 @@ contract SuavePokerTable is ConfStoreHelper {
             }
         }
     }
+
+    function asciiBytesToUint(
+        bytes memory asciiBytes
+    ) public pure returns (uint256) {
+        uint256 result = 0;
+        for (uint256 i = 0; i < asciiBytes.length; i++) {
+            // Subtract '0' (which is 48 in ASCII) from each byte to get the integer value
+            uint256 digit = uint256(uint8(asciiBytes[i])) - 48;
+            // Ensure that the value is between 0 and 9, inclusive
+            require(
+                digit <= 9,
+                "Invalid ASCII byte, must represent a number between 0 and 9"
+            );
+            // Shift left and add the current digit
+            result = result * 10 + digit;
+        }
+        return result;
+    }
+    /*
+    // Need this for tests
+    function getLookupValue(
+        uint8 card0,
+        uint8 card1,
+        uint8 card2,
+        uint8 card3,
+        uint8 card4,
+        uint8 card5,
+        uint8 card6
+    ) internal virtual returns (uint) {}
+    */
+
+    function getLookupValue(
+        uint8 card0,
+        uint8 card1,
+        uint8 card2,
+        uint8 card3,
+        uint8 card4,
+        uint8 card5,
+        uint8 card6
+    ) internal returns (uint) {
+        Suave.HttpRequest memory request;
+        request.method = "GET";
+        string memory url = string.concat(
+            "https://api.pokertee.xyz/getLookupValue?card0=",
+            Strings.toString(card0),
+            "&card1=",
+            Strings.toString(card1),
+            "&card2=",
+            Strings.toString(card2),
+            "&card3=",
+            Strings.toString(card3),
+            "&card4=",
+            Strings.toString(card4),
+            "&card5=",
+            Strings.toString(card5),
+            "&card6=",
+            Strings.toString(card6)
+        );
+        request.url = url;
+        //.url = "http://54.183.159.52:5000/getLookupValue?card0=53&card1=54&card2=55&card3=56&card4=57&card5=58&card6=59";
+        request.headers = new string[](1);
+        request.headers[0] = "Content-Type: application/json";
+        bytes memory output = Suave.doHTTPRequest(request);
+        uint val = asciiBytesToUint(output);
+        return val;
+    }
+
+    function emitToWS(bytes memory body) internal override {
+        Suave.HttpRequest memory request;
+        request.method = "POST";
+        request.url = "https://api.pokertee.xyz/postAction";
+
+        request.headers = new string[](1);
+        request.headers[0] = "Content-Type: application/json";
+
+        // bytes memory bodyb = bytes(
+        //     '{"title": "My Card Title", "content": "Call from suave contract..."}'
+        // );
+        request.body = body;
+        bytes memory output = Suave.doHTTPRequest(request);
+        // TODO: should we confirm output?  What can we do if it fails?
+    }
+
+    function apiRequestZ() public returns (bytes memory) {
+        Suave.HttpRequest memory request;
+        request.method = "POST";
+        request.url = "http://54.183.159.52:5000/postCard";
+        request.headers = new string[](1);
+        request.headers[0] = "Content-Type: application/json";
+        request.body = bytes(
+            '{"title": "My Card Title", "content": "Call from suave contract..."}'
+        );
+        bytes memory output = Suave.doHTTPRequest(request);
+
+        // string.concat(s1, s2)
+
+        return abi.encodeWithSelector(this.onchain.selector);
+    }
+
+    // function bytesToUint() external pure returns (uint) {
+    //     bytes memory resp = hex"3537";
+    //     uint256 integerValue = uint256(resp); // cast the bytes32 to uint256
+    //     return integerValue;
+    // }
 }
